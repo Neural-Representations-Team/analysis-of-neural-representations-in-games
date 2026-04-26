@@ -1,0 +1,7 @@
+torch
+wandb
+numpy
+matplotlib
+scikit-learn
+jupyter
+tqdm

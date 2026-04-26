@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE
+.idea/
+
+# Project-specific: datasets and model weights
+data/
+models/
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# PyTorch
+*.pth
+*.pt
+
+# Weights & Biases
+wandb/
+
+# OS
+.DS_Store
+*~
