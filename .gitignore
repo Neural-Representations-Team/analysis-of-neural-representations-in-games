@@ -17,8 +17,8 @@ ENV/
 .idea/
 
 # Project-specific: datasets and model weights
-data/
-models/
+#data/
+#models/
 
 # Distribution / packaging
 *.egg-info/
