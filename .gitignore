@@ -30,9 +30,6 @@ build/
 .coverage
 htmlcov/
 
-# PyTorch
-*.pth
-*.pt
 
 # Weights & Biases
 wandb/
