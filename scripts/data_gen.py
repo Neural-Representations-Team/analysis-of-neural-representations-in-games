@@ -139,5 +139,5 @@ if __name__ == "__main__":
     print("Rozpoczynam generowanie danych...")
     
     # Generujemy 10 000 gier losowych do nauki podstawowych zasad
-    generate_dataset(num_games=10000, strategy="random", seed=42, filename="games.json")
+    generate_dataset(num_games=10000, strategy="random", seed=random.randint(0, 10000), filename="games.json")
     

@@ -16,7 +16,7 @@ ENV/
 # IDE
 .idea/
 
-# Project-specific: datasets and model weights
+# Project-specific: datasets and models weights
 #data/
 #models/
 

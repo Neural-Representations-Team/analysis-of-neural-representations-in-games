@@ -24,3 +24,4 @@ The project aims to investigate how models based on the Transformer architecture
 ├── .gitignore              # Files to be excluded from version control (data/, models/)
 ├── requirements.txt        # Project dependencies (torch, wandb, etc.)
 └── README.md               # Project overview and setup instructions
+```
