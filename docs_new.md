@@ -79,24 +79,46 @@ Przeprowadzone eksperymenty dostarczyły twardych dowodów potwierdzających pos
 
 ### 2.1. Charakterystyka Modelu
 
-Do weryfikacji postawionych hipotez wykorzystano minimalistyczny model językowy oparty na architekturze **Transformer** (wariant *decoder-only*). Celowo wybrano małą sieć, aby proces inżynierii odwrotnej był w pełni kontrolowany i przejrzysty (np. zredukowana liczba warstw i wymiarów wektora ukrytego). Model przetwarza grę w Kółko i Krzyżyk jako jednowymiarową, płaską sekwencję znaków (tokenów), nie posiadając na starcie żadnych wbudowanych, apriorycznych założeń dotyczących dwuwymiarowej geometrii czy fizyki planszy.
+Do weryfikacji postawionych hipotez wykorzystano minimalistyczny model językowy oparty na architekturze Transformer (decoder-only). Celowo wybrano niewielką sieć, aby proces inżynierii odwrotnej był w pełni kontrolowany i umożliwiał szczegółową analizę aktywacji wszystkich warstw. Model przetwarza grę w Kółko i Krzyżyk jako jednowymiarową sekwencję tokenów, nie posiadając żadnych wbudowanych założeń dotyczących geometrii planszy ani reguł gry poza tymi wynikającymi z danych treningowych.
+
+| Parametr | Wartość |
+| :--- | :--- |
+| Liczba warstw transformera | 5 |
+| Wymiar ukryty ($d_{model}$) | 128 |
+
+
+Tak uproszczona architektura pozwala na bezpośrednie śledzenie przepływu informacji pomiędzy warstwami i stanowi dogodny obiekt badań z zakresu mechanistycznej interpretowalności.
 
 ### 2.2. Zbiór Danych
 
-Środowisko treningowe zostało skonstruowane w sposób ściśle izolujący mechanikę gry od jakiejkolwiek taktyki czy koncepcji dążenia do zwycięstwa. Model trenowano na wygenerowanym zbiorze danych zawierającym **wyłącznie losowe, ale w pełni legalne sekwencje ruchów**.
-* Brak jakichkolwiek strategii wygrywających lub heurystyk punktowych.
-* Gry kończą się naturalnie (wygraną jednej ze stron przez losowy przypadek lub remisem).
+Środowisko treningowe zostało skonstruowane w sposób izolujący mechanikę gry od jakiejkolwiek strategii wygrywającej. Model trenowano wyłącznie na losowo generowanych, lecz w pełni legalnych sekwencjach ruchów.
 
-Dzięki takiemu rygorowi danych mamy pewność, że jeśli sieć wykształciła zgeometryzowaną reprezentację planszy, zrobiła to samoistnie i wyłącznie w celu bezbłędnego mapowania dozwolonych pól, a nie jako skutek uboczny naśladowania ludzkich strategii.
+Najważniejsze właściwości zbioru:
+* Brak implementacji strategii wygrywających.
+* Brak funkcji nagrody związanej ze zwycięstwem.
+* Brak heurystyk oceny pozycji.
+* Gry kończą się naturalnie poprzez losowo osiągnięte zwycięstwo lub remis.
+
+Zbiór danych zawierał 10000 wygenerowanych partii, wszystkie były w zbiorze treningowym z uwagi na możliwość wielu poprawnych ruchów dla każdej pozycji i celowe nie przekazywanie modelowi zasad gry.
+
+Dzięki takiemu rygorowi metodologicznemu każda wykryta reprezentacja przestrzenna planszy może być interpretowana jako efekt uboczny rozwiązywania zadania przewidywania legalnych ruchów, a nie rezultat naśladowania strategii obecnych w danych.
 
 ### 2.3. Funkcja Celu (Next-Token Prediction & Legalność)
 
-Proces uczenia opierał się na klasycznym, językowym zadaniu przewidywania następnego tokenu (ang. *Next-Token Prediction*). Funkcją kosztu zastosowaną w treningu była standardowa entropia krzyżowa (Cross-Entropy Loss), wyrażona wzorem:
+## 2.3. Funkcja Celu (Next-Token Prediction & Legalność)
 
-L = - Σ y_i * log(ŷ_i)
+Proces uczenia opierał się na klasycznym zadaniu przewidywania następnego tokenu (*Next-Token Prediction*). Funkcją kosztu zastosowaną podczas treningu była entropia krzyżowa:
 
-gdzie y_i to wektor wskaźnikowy poprawnego ruchu, a ŷ_i to wyjściowy rozkład prawdopodobieństwa wygenerowany przez sieć. Model był optymalizowany pod kątem minimalizacji błędu przy przewidywaniu kolejnego, wylosowanego legalnego ruchu z puli dostępnych w danym momencie gry. Skuteczność wytrenowanego modelu mierzona jest jego zdolnością do kategorycznego przypisywania zerowego prawdopodobieństwa ruchom niedozwolonym (np. próbie postawienia znaku na zajętym już polu).
+$$L = -\sum y_i \log(\hat{y}_i)$$
 
+gdzie:
+* $y_i$ oznacza prawidłowy rozkład docelowy,
+* $\hat{y}_i$ oznacza rozkład prawdopodobieństwa generowany przez model.
+
+Do optymalizacji wykorzystano algorytm AdamW z parametrami:
+* **Learning Rate:** 0.0002
+* **Batch Size:** 10000
+* **Liczba epok:** 15
 ---
 # 3. Ekstrakcja Aktywacji
 
@@ -216,26 +238,54 @@ Oznacza to, że mechanizm *Self-Attention* optymalizuje zasoby na etapie *Late G
 
 ### 5.1. Definicja Dowodu Przyczynowo-Skutkowego
 
-Sondowanie analityczne (opisane w rozdziale 4) dowodzi jedynie *korelacji* – pokazuje, że model w swoich warstwach posiada odseparowane informacje o planszy. Aby udowodnić pełną *przyczynowość* (fakt, że model aktywnie korzysta z tej konkretnej mapy do podejmowania decyzji o ruchu), konieczne jest przeprowadzenie **Interwencji Przyczynowych** (ang. *Causal Interventions* lub *Activation Patching*). Proces ten polega na precyzyjnym "wstrzyknięciu" zmanipulowanego wektora matematycznego bezpośrednio do ukrytych warstw działającej sieci w czasie rzeczywistym i obserwacji, jak ta zmiana wpływa na końcowy wybór tokenu.
+Sondowanie opisane w poprzednim rozdziale pozwala wykazać istnienie informacji w aktywacjach modelu, jednak samo w sobie nie dowodzi, że informacja ta jest wykorzystywana podczas podejmowania decyzji. W tym celu zastosowano metodę Interwencji Przyczynowych (*Causal Interventions*), polegającą na bezpośredniej modyfikacji aktywacji wewnętrznych podczas działania modelu.
+
+Formalnie interwencję można opisać jako:
+
+$$h' = h + \alpha v$$
+
+gdzie:
+* $h$ oznacza oryginalną aktywację,
+* $v$ oznacza kierunek konceptualny odpowiadający badanemu pojęciu,
+* $\alpha$ jest współczynnikiem siły interwencji.
+
+Jeżeli zmiana aktywacji prowadzi do przewidywalnej zmiany decyzji modelu, stanowi to eksperymentalną przesłankę przyczynową wskazującą, że dana reprezentacja bierze udział w procesie decyzyjnym.
 
 ### 5.2. Wymuszanie Decyzji (Modyfikacja Wektora "Pole Puste" na "Pole Zajęte")
 
-Pierwszy eksperyment polegał na celowym okłamaniu modelu. Podczas gdy w rzeczywistości wybrane pole na planszy było puste, do wewnętrznej reprezentacji sieci wstrzyknięto wektor odpowiadający koncepcji "Pole Zajęte" (wyekstrahowany wcześniej z innych, rzeczywiście zajętych pól).
-**Wynik:** Sieć natychmiast i bezwarunkowo przestała rozważać to pole jako potencjalny ruch. Zjawisko to zadziałało niezależnie od tego, w której warstwie decyzyjnej dokonano interwencji, stanowiąc twardy dowód na to, że model aktywnie "czyta" swoją wewnętrzną mapę przestrzenną podczas ewaluacji legalności każdego kroku.
+W pierwszym eksperymencie przeprowadzono próbę sztucznego oznaczenia pustego pola jako zajętego. W tym celu wykorzystano wektor konceptualny odpowiadający pojęciu „pole zajęte”.
+
+Po wykonaniu interwencji zaobserwowano systematyczny spadek prawdopodobieństwa wyboru manipulowanego pola.
+
+Wyniki ilościowe:
+* **Skuteczność interwencji:** 94.5%
+* **Średni spadek prawdopodobieństwa ruchu:** 25%
+* **Liczba analizowanych pozycji:** 20
+
+Uzyskane rezultaty wskazują, że reprezentacja legalności pól nie jest jedynie artefaktem możliwym do odczytania przez sondy, lecz aktywnie uczestniczy w generowaniu decyzji modelu.
 
 ### 5.3. Efekt Fali Uderzeniowej (Kalibracja Siły Interwencji)
 
-Wstrzykiwanie modyfikacji do sieci opartych na liczbach zmiennoprzecinkowych wymaga precyzyjnej kalibracji. Zastosowano skalowalny mnożnik siły interwencji, aby zaobserwować zachowanie modelu na różnym poziomie manipulacji. 
-Zbyt słaba modyfikacja wektora ukrytego zostaje zignorowana i stłumiona przez kolejne nieliniowe transformacje. Dopiero odpowiednio silna interwencja w pełni odwraca dystrybucję prawdopodobieństwa na wyjściu (logits), co wywołuje efekt "fali uderzeniowej" w architekturze wiedzy modelu. Eksperyment ten pozwolił na zmapowanie progów czułości sieci na sztucznie wprowadzane anomalie.
+Ponieważ aktywacje modelu operują w przestrzeni liczb zmiennoprzecinkowych, skuteczność interwencji zależy od jej amplitudy. W eksperymencie przeanalizowano wpływ różnych wartości współczynnika $\alpha$ na końcową dystrybucję prawdopodobieństwa.
+
+Dla małych wartości $\alpha$ wpływ interwencji był ograniczony i ulegał tłumieniu przez kolejne transformacje sieci. Po przekroczeniu określonego progu zaobserwowano gwałtowną zmianę rozkładu wyjściowego, prowadzącą do trwałej zmiany preferowanego ruchu.
+
+Analiza ta pozwoliła wyznaczyć empiryczne progi czułości modelu na manipulację jego reprezentacjami wewnętrznymi.
 
 ### 5.4. Asymetria Przyczynowa i Samonaprawa (Self-Healing) - Analiza Warstwa po Warstwie
 
-Najbardziej przełomowych wniosków dostarczył drugi eksperyment, polegający na operacji odwrotnej: próbie wymuszenia na modelu wygenerowania ruchu nielegalnego poprzez wmówienie mu, że zajęte pole jest wolne.
-Wyniki ujawniły fascynującą **asymetrię przyczynową oraz mechanizm samonaprawy (Self-Healing)**:
-* **Wczesne warstwy (L0, L1):** Próba wstrzyknięcia wektora "puste pole" całkowicie zawiodła. Mechanizmy weryfikujące w głowach uwagi (Self-Attention), stale skanujące początkowe wejście (surową historię ruchów), natychmiast wykrywały niespójność między zmanipulowanym stanem ukrytym a twardymi faktami wejściowymi. Model w czasie rzeczywistym "nadpisywał" kłamstwo badacza i odmawiał wykonania nielegalnego ruchu.
-* **Ostatnia warstwa (L2):** Oszukanie sieci powiodło się dopiero w ostatniej fazie przetwarzania, tuż przed projekcją na ostateczne warstwy wyjściowe. W tym miejscu głowy uwagi nie miały już fizycznej możliwości zrewidowania i skorygowania błędu.
+Najbardziej interesujące wyniki uzyskano podczas eksperymentu odwrotnego. Zamiast oznaczać pole puste jako zajęte, podjęto próbę przekonania modelu, że pole zajęte jest wolne.
 
-Zjawisko to jest twardym dowodem na wysoce redundantną naturę architektury Transformer. Mimo że nie zaprogramowano w niej żadnych procedur awaryjnych, w procesie samoistnego uczenia wykształciła ona potężne **obwody zapasowe** weryfikujące własną "pamięć" i uodparniające proces decyzyjny na wewnętrzne zakłócenia.
+Zaobserwowano wyraźną symetrie zachowania pomiędzy warstwami:
+* **Warstwa L0:** skuteczność interwencji = 0%
+* **Warstwa L1:** skuteczność interwencji = 0.9%
+* **Warstwa L2:** skuteczność interwencji = 1.4%
+
+We wczesnych warstwach manipulacja była w dużej mierze nieskuteczna. Model konsekwentnie odrzucał nielegalne ruchy pomimo zmodyfikowanych aktywacji. Dopiero interwencje przeprowadzone w ostatniej warstwie prowadziły do istotnej zmiany zachowania.
+
+Wynik ten sugeruje istnienie mechanizmów korekcyjnych wykorzystujących informacje obecne w innych częściach reprezentacji modelu. Zamiast pojedynczego miejsca przechowywania wiedzy o legalności ruchów, architektura wydaje się wykorzystywać częściowo redundantne reprezentacje zdolne do kompensowania lokalnych zaburzeń.
+
+Zjawisko to interpretujemy jako przejaw funkcjonalnej redundancji reprezentacji wewnętrznych i ograniczonej formy samonaprawy (*self-healing*) występującej podczas przetwarzania informacji przez model.
 
 ---
 
