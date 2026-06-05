@@ -257,10 +257,8 @@ W pierwszym eksperymencie przeprowadzono próbę sztucznego oznaczenia pustego p
 
 Po wykonaniu interwencji zaobserwowano systematyczny spadek prawdopodobieństwa wyboru manipulowanego pola.
 
-Wyniki ilościowe:
-* **Skuteczność interwencji:** 94.5%
-* **Średni spadek prawdopodobieństwa ruchu:** 25%
-* **Liczba analizowanych pozycji:** 20
+<img src="/plots/interventions/interv_empty_to_full_lategame_L1.png" width="240" alt="Zatarcie Liniowe - Porównanie Sond">
+*Wykres 7: Wpływ interwencji przyczynowej na dystrybucję prawdopodobieństwa (Warstwa 1). Sztuczna modyfikacja aktywacji wewnętrznych, wmawiająca modelowi, że lewe dolne pole jest zajęte, drastycznie obniża prawdopodobieństwo jego wyboru (spadek z 27,3% do 2,4%). Model dynamicznie przenosi masę prawdopodobieństwa na pozostałe puste pola (wzrost na prawym górnym i prawym środkowym polu), co stanowi bezpośredni dowód na przyczynowo-skutkową rolę badanej reprezentacji w procesie decyzyjnym sieci.*
 
 Uzyskane rezultaty wskazują, że reprezentacja legalności pól nie jest jedynie artefaktem możliwym do odczytania przez sondy, lecz aktywnie uczestniczy w generowaniu decyzji modelu.
 
@@ -280,6 +278,9 @@ Zaobserwowano wyraźną symetrie zachowania pomiędzy warstwami:
 * **Warstwa L0:** skuteczność interwencji = 0%
 * **Warstwa L1:** skuteczność interwencji = 0.9%
 * **Warstwa L2:** skuteczność interwencji = 1.4%
+
+<img src="/plots/interventions/interv_full_to_empty_midgame_L1.png" width="240" alt="Zatarcie Liniowe - Porównanie Sond">
+*Wykres 8: Efekt samonaprawy (self-healing) i asymetria przyczynowa (Warstwa 1). Próba sztucznego przekonania modelu, że zajęte pole (górne środkowe) jest wolne, okazuje się w dużej mierze nieskuteczna na wszystkich warstwach. Mimo interwencji, prawdopodobieństwo wyboru zmanipulowanego pola wzrasta jedynie z 0,1% do zaledwie 1,0%, podczas gdy sieć konsekwentnie rozkłada główną masę prawdopodobieństwa na faktycznie puste pola (utrzymując udziały rzędu 17–21%). Wynik ten ilustruje odporność warstw modelu na lokalne zaburzenia i stanowi wizualizację mechanizmów korekcyjnych opartych na redundantnych reprezentacjach stanu gry.*
 
 We wczesnych warstwach manipulacja była w dużej mierze nieskuteczna. Model konsekwentnie odrzucał nielegalne ruchy pomimo zmodyfikowanych aktywacji. Dopiero interwencje przeprowadzone w ostatniej warstwie prowadziły do istotnej zmiany zachowania.
 
