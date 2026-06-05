@@ -158,10 +158,10 @@ Zarówno sonda liniowa, jak i MLP osiągnęły w tym zadaniu doskonałą skutecz
 
 Zauważono jednak interesującą anomalię widoczną na poniższych wykresach. O ile przez większość rozgrywki model doskonale reprezentuje stan całej planszy, o tyle **w samym końcowym etapie gry (ostatni ruch przed wygraną lub remisem) skuteczność detekcji drastycznie spada**. Dotyczy to zarówno reprezentacji liniowej, jak i nieliniowej (MLP). Przypuszczamy że to wynika z tego że w decydującym momencie model przestaje utrzymywać w pamięci fizykę całej planszy (nieistotnych już pól), koncentrując całą swoją uwagę wyłącznie na jednym polu, które gwarantuje natychmiastowe zwycięstwo.
 
-![Fizyka - Sonda Liniowa](/plots/03_lin_fizyka.png)
+<img src="/plots/03_lin_fizyka.png" width="240" alt="Fizyka - Sonda Liniowa">
 *Wykres 1: Skuteczność sondy liniowej w detekcji fizyki planszy w podziale na długość gry. Widoczny wyraźny spadek świadomości przestrzennej w ostatnich ruchach.*
 
-![Fizyka - Sonda MLP](/plots/05_mlp_fizyka.png)
+<img src="/plots/05_mlp_fizyka.png" width="240" alt="Fizyka - Sonda MLP">
 *Wykres 2: Skuteczność sondy MLP w detekcji fizyki planszy. Pomimo zastosowania nieliniowych przekształceń, zjawisko spadku świadomości w końcówce gry nadal występuje, co potwierdza celowe "zapominanie" przez sieć.*
 
 ### 4.3. Wyniki Detekcji: Taktyka (Mój Pionek vs Pionek Wroga)
@@ -172,13 +172,13 @@ Wyniki eksperymentu ukazują diametralną różnicę w architekturze wiedzy mode
 
 Prowadzi to do ważnego wniosku o budowie modelu językowego: świadomość "czyj to pionek" jest pojęciem głęboko splątanym nieliniowo wewnątrz 128-wymiarowej przestrzeni ukrytej. Sieć przechowuje tę relację w sposób rozproszony, a jej odczytanie wymaga zastosowania dodatkowych warstw transformacji (jak w MLP).
 
-![Dokładność Obrazu Świata](/plots/02_obraz_swiata.png)
+<img src="/plots/02_obraz_swiata.png" width="240" alt="Dokładność Obrazu Świata">
 *Wykres 3: Porównanie skuteczności sondy MLP dla zjawisk fizyki (wyższa skuteczność) oraz taktyki (nieco niższa skuteczność, świadcząca o wyższym stopniu skomplikowania problemu).*
 
-![Taktyka - Sonda Liniowa](/plots/04_lin_taktyka.png)
+<img src="/plots/04_lin_taktyka.png" width="240" alt="Taktyka - Sonda Liniowa">
 *Wykres 4: Skuteczność sondy liniowej w zadaniu taktycznym. Widoczny jest problem z liniową separacją tej cechy, wykresy szybko opadają w miarę postępu gry.*
 
-![Taktyka - Sonda MLP](/plots/06_mlp_taktyka.png)
+<img src="/plots/06_mlp_taktyka.png" width="240" alt="Taktyka - Sonda MLP">
 *Wykres 5: Skuteczność sondy MLP w zadaniu taktycznym. Sieć potrafi wydobyć wiedzę o własności pionka, co potwierdza, że informacja ta istnieje w modelu, lecz ma charakter nieliniowy.*
 
 ### 4.4. Zjawisko Zatarcia Liniowego (Attention Shift w Czasie)
@@ -189,7 +189,7 @@ Zgrupowanie wyników względem długości gry pokazuje wyraźny wzorzec: w szybk
 
 Oznacza to, że mechanizm *Self-Attention* optymalizuje zasoby na etapie *Late Game*. Sieć celowo "zapomina" nieistotne, stare ruchy, skupiając całą pojemność wektorową wyłącznie na "gorących polach" – niezbędnych do natychmiastowej wygranej lub zablokowania przeciwnika. Zjawisko to dowodzi, że sieć działa jak dynamiczny procesor uwagi, a nie statyczna baza danych.
 
-![Zatarcie Liniowe - Porównanie Sond](/plots/01_zatarcie_liniowe.png)
+<img src="/plots/01_zatarcie_liniowe.png" width="240" alt="Zatarcie Liniowe - Porównanie Sond">
 *Wykres 6: Skuteczność detekcji taktyki na egzaminie. Zatarcie liniowe drastycznie obniża skuteczność płaskich reprezentacji (niebieskie słupki). Głębokie sieci MLP (czerwone słupki) są odporniejsze i wciąż dekodują splątane dane z warstw ukrytych.*
 
 # 6. Podsumowanie i Wnioski
