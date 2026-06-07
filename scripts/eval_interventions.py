@@ -57,7 +57,7 @@ def przeprowadz_wielokrotne_interwencje():
             'id': 'empty_to_full_midgame',
             'title': 'Empty to Full (Mid Game)',
             'ruchy': [0, 3, 1, 4],  # X: 0, 1; O: 3, 4. Puste docelowe: 2
-            'pole_docelowe': 2,
+            'pole_docelowe': 5,
             'stan_oryginalny': 0,  # 0 = Puste
             'stan_falszywy': 2,  # 2 = Wróg
             'sila': 1.0
@@ -106,10 +106,11 @@ def przeprowadz_wielokrotne_interwencje():
             # Zbudowanie stanu planszy do wizualizacji
             board_3x3 = get_board_state(scenario['ruchy'])
 
+            # --- ZMIANA: BIERZEMY 10 TOKENÓW (0-8 to plansza, 9 to koniec gry) ---
             # BIEG CZYSTY
             with torch.no_grad():
                 czyste_logity = model(input_tensor)
-                czyste_prawdopodobienstwa = torch.softmax(czyste_logity[0, -1, :9], dim=0).numpy()
+                czyste_prawdopodobienstwa = torch.softmax(czyste_logity[0, -1, :10], dim=0).numpy()
 
             # BIEG Z INTERWENCJĄ
             wektor_oryginalny = W_probe[stan_oryginalny * 9 + pole]
@@ -123,20 +124,24 @@ def przeprowadz_wielokrotne_interwencje():
 
             with torch.no_grad():
                 oszukane_logity = model(input_tensor)
-                oszukane_prawdopodobienstwa = torch.softmax(oszukane_logity[0, -1, :9], dim=0).numpy()
+                oszukane_prawdopodobienstwa = torch.softmax(oszukane_logity[0, -1, :10], dim=0).numpy()
 
             uchwyt_haczyka.remove()
 
-            # --- NOWA WIZUALIZACJA (DWIE PLANSZE) ---
-            clean_prob_3x3 = (czyste_prawdopodobienstwa * 100).reshape(3, 3)
-            interv_prob_3x3 = (oszukane_prawdopodobienstwa * 100).reshape(3, 3)
+            # --- NOWA WIZUALIZACJA Z TOKENEM KOŃCA GRY ---
+            # Plansza zajmuje tylko pierwsze 9 wartości
+            clean_prob_3x3 = (czyste_prawdopodobienstwa[:9] * 100).reshape(3, 3)
+            interv_prob_3x3 = (oszukane_prawdopodobienstwa[:9] * 100).reshape(3, 3)
 
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+            # Wartości dla tokenu 9
+            clean_end_prob = czyste_prawdopodobienstwa[9] * 100
+            interv_end_prob = oszukane_prawdopodobienstwa[9] * 100
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 6.5), constrained_layout=True)
             fig.suptitle(f"Causal Intervention: {scenario['title']} | Layer {layer_idx}", fontsize=16,
                          fontweight='bold')
 
-            # Zmodyfikowana funkcja rysująca pojedynczą planszę
-            def draw_board(ax, prob_matrix, title, is_intervention=False):
+            def draw_board(ax, prob_matrix, end_prob, title, is_intervention=False):
                 annot = np.empty((3, 3), dtype=object)
                 mapa_stanow = {0: "Puste", 1: "X", 2: "O"}
 
@@ -144,7 +149,6 @@ def przeprowadz_wielokrotne_interwencje():
                     for c in range(3):
                         indeks_pola = r * 3 + c
 
-                        # Ustalanie głównego symbolu na planszy
                         if board_3x3[r, c] == 1:
                             symbol = "X"
                         elif board_3x3[r, c] == 2:
@@ -154,7 +158,6 @@ def przeprowadz_wielokrotne_interwencje():
 
                         tekst_etykiety = symbol
 
-                        # Sprawdzanie czy jesteśmy na planszy interwencji i na zmienianym polu
                         if is_intervention and indeks_pola == pole:
                             falszywy_symbol = mapa_stanow[stan_falszywy]
                             if tekst_etykiety != "":
@@ -162,7 +165,6 @@ def przeprowadz_wielokrotne_interwencje():
                             else:
                                 tekst_etykiety = f"(Zmiana na: {falszywy_symbol})"
 
-                        # Zawsze dodajemy procenty na samym dole
                         if tekst_etykiety != "":
                             tekst_etykiety += f"\n{prob_matrix[r, c]:.1f}%"
                         else:
@@ -170,7 +172,6 @@ def przeprowadz_wielokrotne_interwencje():
 
                         annot[r, c] = tekst_etykiety
 
-                # Rysowanie za pomocą seaborn
                 sns.heatmap(prob_matrix, annot=annot, fmt="", cmap="Blues", vmin=0, vmax=100,
                             cbar=False, ax=ax, linewidths=2, linecolor='black', square=True,
                             annot_kws={"size": 11, "weight": "bold"})
@@ -179,11 +180,19 @@ def przeprowadz_wielokrotne_interwencje():
                 ax.set_xticks([])
                 ax.set_yticks([])
 
-            # Rysowanie obu plansz z odpowiednią flagą
-            draw_board(axes[0], clean_prob_3x3, "Clean Run (Normal State)", is_intervention=False)
-            draw_board(axes[1], interv_prob_3x3, f"Intervention (Modified Memory at Sq. {pole})", is_intervention=True)
+                # Dodanie wyraźnego paska/tekstu z prawdopodobieństwem końca gry pod planszą
+                kolor_tekstu = "red" if end_prob > 50 else "black"
+                ax.text(1.5, 3.2, f"END TOKEN (9): {end_prob:.1f}%",
+                        ha='center', va='center', fontsize=14, fontweight='bold',
+                        color=kolor_tekstu, bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5'))
 
-            sciezka = f"../plots/interventions/interv_{scenario['id']}_L{layer_idx}.png"
+            # Rysowanie obu plansz
+            draw_board(axes[0], clean_prob_3x3, clean_end_prob, "Clean Run (Normal State)", is_intervention=False)
+            draw_board(axes[1], interv_prob_3x3, interv_end_prob, f"Intervention (Modified Memory at Sq. {pole})",
+                       is_intervention=True)
+
+            sciezka = f"../plots/interventions_new/interv_{scenario['id']}_L{layer_idx}.png"
+            os.makedirs(os.path.dirname(sciezka), exist_ok=True)
             plt.savefig(sciezka, dpi=300, bbox_inches='tight')
             plt.close(fig)
             print(f"    Zapisano wykres: {sciezka}")
