@@ -93,3 +93,88 @@ def trenuj_sondy(aktywacje_warstwy, relatywne_trening, liczba_trening=1000, epoc
         opt_mlp.step()
 
     return sonda_lin, sonda_mlp
+
+
+import plotly.graph_objects as go
+from sklearn.decomposition import PCA
+import numpy as np
+import os
+
+def wizualizuj_geometrie_pca_3d(wagi_sondy, tytul="Geometria Wag Sondy Liniowej w 3D"):
+    """
+    Tworzy interaktywny wykres 3D PCA pokazujący, jak model widzi geometrię planszy.
+    Zapisuje wynik jako plik HTML, który można obracać w przeglądarce.
+    """
+    print(f"Generowanie interaktywnego wykresu 3D: {tytul}...")
+
+    # 1. Pobieramy wagi dla 9 pól (stan 0 = Pole Puste)
+    wektory = wagi_sondy[0:9, :].cpu().numpy()
+
+    # 2. Redukcja wymiarów do 3D za pomocą PCA
+    pca = PCA(n_components=3)
+    wektory_3d = pca.fit_transform(wektory)
+
+    # Rozdzielenie współrzędnych dla ułatwienia
+    x = wektory_3d[:, 0]
+    y = wektory_3d[:, 1]
+    z = wektory_3d[:, 2]
+
+    # 3. Definicja połączeń (siatka planszy)
+    polaczenia = [
+        (0, 1), (1, 2),  # Poziom: górny rząd
+        (3, 4), (4, 5),  # Poziom: środkowy rząd
+        (6, 7), (7, 8),  # Poziom: dolny rząd
+        (0, 3), (3, 6),  # Pion: lewa kolumna
+        (1, 4), (4, 7),  # Pion: środkowa kolumna
+        (2, 5), (5, 8)   # Pion: prawa kolumna
+    ]
+
+    # 4. Budowanie linii (krawędzi łączących punkty)
+    # Wstawiamy None między parami, żeby linie nie łączyły się w jedną długą nitkę
+    edge_x, edge_y, edge_z = [], [], []
+    for p1, p2 in polaczenia:
+        edge_x.extend([x[p1], x[p2], None])
+        edge_y.extend([y[p1], y[p2], None])
+        edge_z.extend([z[p1], z[p2], None])
+
+    trace_edges = go.Scatter3d(
+        x=edge_x, y=edge_y, z=edge_z,
+        mode='lines',
+        line=dict(color='gray', width=4),
+        hoverinfo='none'
+    )
+
+    # 5. Budowanie punktów (węzłów - nasze 9 pól)
+    trace_nodes = go.Scatter3d(
+        x=x, y=y, z=z,
+        mode='markers+text',
+        marker=dict(size=8, color='red', line=dict(width=2, color='black')),
+        text=[str(i) for i in range(9)], # Numeracja pól od 0 do 8
+        textposition="top center",
+        textfont=dict(size=16, color='black', family="Arial Black"),
+        hoverinfo='text'
+    )
+
+    # 6. Składanie wykresu w jedną całość
+    fig = go.Figure(data=[trace_edges, trace_nodes])
+
+    fig.update_layout(
+        title=tytul,
+        showlegend=False,
+        scene=dict(
+            xaxis_title='Składowa 1 (PCA)',
+            yaxis_title='Składowa 2 (PCA)',
+            zaxis_title='Składowa 3 (PCA)'
+        ),
+        width=900,
+        height=700,
+        margin=dict(l=0, r=0, b=0, t=40) # Mniejsze marginesy
+    )
+
+    # 7. Zapis pliku jako interaktywny HTML
+    os.makedirs('../plots/geometria', exist_ok=True)
+    czysta_nazwa = tytul.replace(" ", "_").replace(":", "")
+    sciezka = f"../plots/geometria/{czysta_nazwa}.html"
+
+    fig.write_html(sciezka)
+    print(f"Zapisano pomyślnie. Otwórz ten plik w przeglądarce: {sciezka}")
