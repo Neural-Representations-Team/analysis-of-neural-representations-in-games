@@ -301,6 +301,7 @@ h' = h + \alpha v
 $$
 
 gdzie:
+
 * $h$ oznacza oryginalną aktywację,
 * $v$ oznacza kierunek konceptualny odpowiadający badanemu pojęciu,
 * $\alpha$ jest współczynnikiem siły interwencji.
