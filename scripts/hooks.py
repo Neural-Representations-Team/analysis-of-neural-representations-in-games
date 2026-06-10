@@ -122,10 +122,8 @@ def ekstrahuj_aktywacje(sciezka_modelu, sciezka_json, sciezka_wyjsciowa):
     print("Zakończono! Dane bezpiecznie zarchiwizowane na dysku.")
 
 
-# --- GŁÓWNY BLOK STARTOWY ---
 
 if __name__ == "__main__":
-    # Centralne zarządzanie ścieżkami ułatwia zmiany w przyszłości
     SCIEZKA_MODELU = '../models/transformer/tictactoe_model.pth'
     SCIEZKA_DANYCH_JSON = '../data/games.json'
     SCIEZKA_WYJSCIOWA = '../data/processed/dataset_pelny.pt'

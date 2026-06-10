@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import os
-#TODO Naprawić te pliki i przenieść do notebooków
 
 # Importy z naszego uporządkowanego narzędziownika
 from probe_utils import przygotuj_dane, trenuj_sondy
@@ -12,7 +11,6 @@ from probe_utils import przygotuj_dane, trenuj_sondy
 plt.style.use('ggplot')
 
 
-# --- 1. DEFINICJA MODELU GPT ---
 class TinyTicTacToeGPT(nn.Module):
     def __init__(self, d_model=128, num_layers=3, nhead=8):
         super().__init__()
@@ -98,7 +96,7 @@ def generuj_przestrzenne_mapy():
         board_state = get_relative_board_state(ruchy)
         saliency_spatial = np.zeros(9)
 
-        # 4. Matematyczna magjia - Iloczyn skalarny z wektorami sondy
+        # Iloczyn skalarny z wektorami sondy
         for i in range(9):
             s = board_state[i]
             # Odnajdujemy właściwy wiersz w macierzy sondy: [Stan * 9 + Pole]

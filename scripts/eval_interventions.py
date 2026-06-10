@@ -106,7 +106,6 @@ def przeprowadz_wielokrotne_interwencje():
             # Zbudowanie stanu planszy do wizualizacji
             board_3x3 = get_board_state(scenario['ruchy'])
 
-            # --- ZMIANA: BIERZEMY 10 TOKENÓW (0-8 to plansza, 9 to koniec gry) ---
             # BIEG CZYSTY
             with torch.no_grad():
                 czyste_logity = model(input_tensor)
@@ -128,7 +127,6 @@ def przeprowadz_wielokrotne_interwencje():
 
             uchwyt_haczyka.remove()
 
-            # --- NOWA WIZUALIZACJA Z TOKENEM KOŃCA GRY ---
             # Plansza zajmuje tylko pierwsze 9 wartości
             clean_prob_3x3 = (czyste_prawdopodobienstwa[:9] * 100).reshape(3, 3)
             interv_prob_3x3 = (oszukane_prawdopodobienstwa[:9] * 100).reshape(3, 3)

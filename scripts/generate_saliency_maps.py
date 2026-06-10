@@ -127,8 +127,6 @@ def generuj_mapy_istotnosci():
                 # Co drugi ruch to X (1), co drugi O (2)
                 board_state[row, col] = 1 if i % 2 == 0 else 2
 
-        # Generujemy heatmapę przy użyciu imshow (Matplotlib)
-        # Używamy mapy kolorów 'Oranges' dla istotności
         im = ax.imshow(saliency_grid, cmap='Oranges', vmin=0, vmax=1)
         cbar = fig.colorbar(im, label='Relatywna Istotność (Gradient)')
 
@@ -159,7 +157,5 @@ def generuj_mapy_istotnosci():
     print("Gotowe. Wszystkie mapy istotności zostały zapisane w katalogu: '../plots/saliency_maps/'.")
 
 
-# --- 3. GŁÓWNY BLOK STARTOWY ---
 if __name__ == '__main__':
-    # Uruchamiamy generowanie map
     generuj_mapy_istotnosci()

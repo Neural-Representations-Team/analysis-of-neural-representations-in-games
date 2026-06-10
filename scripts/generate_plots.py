@@ -18,8 +18,6 @@ def zapisz_wykres(fig, nazwa_pliku):
     plt.close(fig)  # Zamyka okno, aby nie zaśmiecać RAMu
 
 
-# --- FUNKCJE RYSUJĄCE POZOSTAJĄ BEZ ZMIAN ---
-
 def plot_probe_comparison(linear_acc, mlp_acc):
     warstwy = ['Warstwa 0', 'Warstwa 1', 'Warstwa 2']
     x = np.arange(len(warstwy))

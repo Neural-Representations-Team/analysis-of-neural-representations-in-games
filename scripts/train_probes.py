@@ -69,7 +69,6 @@ for nazwa_warstwy in ['warstwa_0', 'warstwa_1', 'warstwa_2']:
         # Odpalenie generowania wykresu
         wizualizuj_geometrie_pca_3d(wagi_koncowe, tytul=f"Geometria Sieci - {typ_sondy} {nazwa_warstwy}")
 
-# --- MODUŁ RENTGENA TERMINALOWEGO ---
 print("\n" + "=" * 50)
 print("URUCHAMIAM RENTGEN DLA OSTATNIEJ TRENOWANEJ WARSTWY (GRA Z EGZAMINU)")
 print("=" * 50)
