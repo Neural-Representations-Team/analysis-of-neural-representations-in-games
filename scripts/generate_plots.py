@@ -55,22 +55,29 @@ def plot_world_model_resolution(fizyka_dane, taktyka_dane):
 
 
 def plot_attention_shift_by_length_and_probe(dane, tytul_glowny, ylabel):
-    kolory = {'warstwa_0': '#8e44ad', 'warstwa_1': '#2c3e50', 'warstwa_2': '#e67e22'}
-    nazwy = {'warstwa_0': 'W0 (Wejście)', 'warstwa_1': 'W1 (Kartograf)', 'warstwa_2': 'W2 (Decyzyjna)'}
+    # Usunięto kolory i nazwy dla warstwy 0 i 2, zostaje tylko warstwa 1
+    kolory = {'warstwa_1': '#2c3e50'}
+    nazwy = {'warstwa_1': 'W1 (Kartograf)'}
     fig, axes = plt.subplots(5, 1, figsize=(10, 16), constrained_layout=True)
     fig.suptitle(tytul_glowny, fontsize=16, fontweight='bold')
+
     for i, L in enumerate(range(5, 10)):
         ax = axes[i]
-        if not dane[L]['warstwa_0']: continue
+        # Sprawdzamy obecność danych tylko dla warstwy 1
+        if not dane[L]['warstwa_1']: continue
+
         kroki = np.arange(1, L + 1)
-        for w in ['warstwa_0', 'warstwa_1', 'warstwa_2']:
-            ax.plot(kroki, dane[L][w], marker='o', linewidth=2, label=nazwy[w], color=kolory[w])
+        # Rysujemy wykres wyłącznie dla warstwy 1
+        ax.plot(kroki, dane[L]['warstwa_1'], marker='o', linewidth=2, label=nazwy['warstwa_1'],
+                color=kolory['warstwa_1'])
+
         ax.set_title(f'Gry kończące się w {L}. ruchu')
         ax.set_xticks(kroki)
         ax.set_ylabel(ylabel, fontweight='bold')
         ax.set_ylim(30, 105)
         ax.grid(True, linestyle='--', alpha=0.7)
         if i == 0: ax.legend()
+
     return fig
 
 

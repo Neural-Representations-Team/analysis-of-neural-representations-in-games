@@ -3,6 +3,22 @@ import torch.nn as nn
 
 # --- DEFINICJE SOND ---
 
+class MLPProbe(nn.Module):
+    def __init__(self, input_size, output_size):
+        super().__init__()
+        self.layer = nn.Sequential(
+            nn.Linear(input_size, 22),
+            nn.ReLU(),
+            nn.Linear(22, output_size)
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+    def count_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
 class LinearProbe(nn.Module):
     def __init__(self, input_size, output_size):
         super().__init__()
@@ -11,18 +27,8 @@ class LinearProbe(nn.Module):
     def forward(self, x):
         return self.layer(x)
 
-
-class MLPProbe(nn.Module):
-    def __init__(self, input_size, output_size):
-        super().__init__()
-        self.layer = nn.Sequential(
-            nn.Linear(input_size, 256),
-            nn.ReLU(),
-            nn.Linear(256, output_size)
-        )
-
-    def forward(self, x):
-        return self.layer(x)
+    def count_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 # --- FUNKCJE POMOCNICZE ---

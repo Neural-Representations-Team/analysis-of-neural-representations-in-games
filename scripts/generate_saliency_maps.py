@@ -2,9 +2,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import os
-import json
 import numpy as np
-#TODO Naprawić te pliki i przenieść do notebooków
 
 # --- 0. KONFIGURACJA ŚCIEŻEK ---
 SCIEZKA_MODELU = '../models/transformer/tictactoe_model.pth'
@@ -12,10 +10,9 @@ FOLDER_WYJSCIOWY = '../plots/saliency_maps'
 os.makedirs(FOLDER_WYJSCIOWY, exist_ok=True)
 
 
-# --- 1. DEFINICJA MODELU (ATRAPA) ---
+# --- 1. DEFINICJA MODELU Z MECHANIZMEM INTERWENCJI ---
 class TinyTicTacToeGPT(nn.Module):
-    # Model musi mieć identyczną strukturę jak ten, na którym trenowaliśmy
-    def __init__(self, d_model=64, num_layers=2, nhead=4):
+    def __init__(self, d_model=128, num_layers=3, nhead=8):
         super().__init__()
         self.embedding = nn.Embedding(11, d_model)
         self.pos_encoder = nn.Embedding(10, d_model)
@@ -23,138 +20,131 @@ class TinyTicTacToeGPT(nn.Module):
         self.transformer = nn.TransformerEncoder(decoder_layer, num_layers=num_layers)
         self.fc_out = nn.Linear(d_model, 11)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, intervene_pos=None):
         seq_len = x.size(1)
         positions = torch.arange(0, seq_len, device=x.device).unsqueeze(0)
 
-        # Wyciągamy osadzenia osobno, żeby móc obliczyć gradienty
         input_embeddings = self.embedding(x)
+
+        # MECHANIZM INTERWENCJI (Z artykułu Othello-GPT)
+        # Zmieniamy ukrytą reprezentację konkretnego pola (zerujemy ją)
+        if intervene_pos is not None:
+            input_embeddings[:, intervene_pos, :] = 0.0
+
         embeddings = input_embeddings + self.pos_encoder(positions)
 
-        # Generujemy maskę przyczynową (square subsequent mask)
         if mask is None:
             mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
 
         out = self.transformer(embeddings, mask=mask)
         logits = self.fc_out(out)
 
-        # Zwracamy logity ORAZ osadzenia wejściowe (do gradientów)
-        return logits, input_embeddings
+        return logits
 
 
 # --- 2. GŁÓWNA FUNKCJA GENERUJĄCA MAPY ---
 def generuj_mapy_istotnosci():
     print("Inicjalizacja modelu i wczytywanie wag...")
-    # Model musi mieć identyczne hiperparametry
     model = TinyTicTacToeGPT(d_model=128, num_layers=3, nhead=8)
-    # Wczytujemy wagi. Weights_only=True dla bezpieczeństwa.
-    model.load_state_dict(torch.load(SCIEZKA_MODELU, map_location=torch.device('cpu'), weights_only=True))
-    # Przełączamy model w tryb ewaluacji
-    model.eval()
+    # Wczytujemy wagi (upewnij się, że plik istnieje przed uruchomieniem)
+    try:
+        model.load_state_dict(torch.load(SCIEZKA_MODELU, map_location=torch.device('cpu'), weights_only=True))
+    except FileNotFoundError:
+        print(
+            f"Błąd: Nie znaleziono pliku modelu w {SCIEZKA_MODELU}. Skrypt będzie kontynuował z losowymi wagami do testów.")
 
-    # --- A. PRZYGOTOWANIE SCENARIUSZY GIER ---
+    model.eval()  # Tryb testowy, wyłącza niepotrzebne procesy uczenia
+
     scenariusze = [
-        ("Gotowa wygrana (X w polu 2)", [0, 3, 1, 4]),  # Krzyżyk gra 0, 1 -> wygrana w 2
-        ("Konieczność blokady (X w polu 7)", [0, 1, 3, 4, 8]),  # Kółko ma 1, 4 -> krzyżyk musi 7
-        ("Początek gry (Pusta plansza)", [10]),  # Używamy tokenu [10] jako początku
+        ("Gotowa wygrana (X w polu 2)", [0, 3, 1, 4]),
+        ("Konieczność blokady (X w polu 7)", [0, 1, 3, 4, 8]),
+        ("Początek gry (Pusta plansza)", [10]),
     ]
 
-    # Mapowanie symboli dla czytelności wizualizacji
-    symbole = {0: "⬜", 1: "X", 2: "O", 9: "PADDING", 10: "Początek"}
+    print("Rozpoczynam generowanie map istotności (metoda interwencji)...")
 
-    print("Rozpoczynam generowanie map istotności...")
+    # Wszystko robimy bez gradientów, bo metoda opiera się na fizycznej podmianie
+    with torch.no_grad():
+        for nazwa_scenariusza, ruchy in scenariusze:
+            print(f"  > Przetwarzanie: {nazwa_scenariusza}...")
 
-    for nazwa_scenariusza, ruchy in scenariusze:
-        print(f"  > Przetwarzanie: {nazwa_scenariusza}...")
+            gra_tensor = torch.tensor([ruchy], dtype=torch.long)
+            seq_len = len(ruchy)
 
-        # Tworzymy tensor wejściowy
-        gra_tensor = torch.tensor([ruchy], dtype=torch.long)
+            # KROK 1: Obliczenie bazowego prawdopodobieństwa (p0)
+            logits_base = model(gra_tensor)
+            # Używamy softmax, by uzyskać procentowe szanse na dany ruch
+            probs_base = torch.softmax(logits_base[0, -1, :], dim=-1)
 
-        # Włączamy śledzenie gradientów dla osadzeń wejściowych
-        # Przepuszczamy dane przez model, aby dostać logity i osadzenia
-        logits, input_embeddings = model(gra_tensor)
+            # Sieć wybiera ruch z największą szansą
+            chosen_move_idx = torch.argmax(probs_base).item()
+            p0 = probs_base[chosen_move_idx].item()
 
-        # input_embeddings ma kształt [batch, seq_len, d_model] -> [1, seq_len, 128]
-        # Chcemy gradient względem tego tensora
-        input_embeddings.retain_grad()
+            saliency_seq = np.zeros(seq_len)
 
-        # Ostatnie wyjście (dla ostatniego ruchu w sekwencji)
-        target_output = logits[0, -1, :]
+            # KROK 2: Interwencja pole po polu (p_s)
+            for s in range(seq_len):
+                if ruchy[s] == 10:
+                    continue  # Ignorujemy token początku gry
 
-        # Wybieramy indeks wybranego przez model ruchu (najwyższy logit)
-        chosen_move_idx = torch.argmax(target_output).item()
+                # Przepuszczamy dane przez sieć, ale wyłączamy (zerujemy) informacje o ruchu 's'
+                logits_int = model(gra_tensor, intervene_pos=s)
+                probs_int = torch.softmax(logits_int[0, -1, :], dim=-1)
 
-        # Obliczamy "score" dla wybranego ruchu. To jego gradienty nas interesują.
-        score = target_output[chosen_move_idx]
+                # Sprawdzamy szansę DLA TEGO SAMEGO RUCHU, co na początku
+                ps = probs_int[chosen_move_idx].item()
 
-        # Wsteczna propagacja: oblicz gradienty 'score' względem 'input_embeddings'
-        model.zero_grad()
-        score.backward()
+                # Ważność = bazowa szansa minus szansa po usunięciu kafelka
+                saliency_seq[s] = p0 - ps
 
-        # Gradienty osadzeń wejściowych: [1, seq_len, 128]
-        saliency_gradients = input_embeddings.grad.data.abs()
+            # Normalizacja wyników do przedziału [0, 1] dla ładniejszych kolorów na mapie
+            max_val = np.max(np.abs(saliency_seq))
+            if max_val > 0:
+                saliency_seq = np.abs(saliency_seq) / max_val
+            else:
+                saliency_seq = np.zeros_like(saliency_seq)
 
-        # Agregujemy gradienty: sumujemy po wymiarze d_model, żeby dostać istotność dla każdego ruchu
-        # shapes: [1, seq_len, 128] -> [1, seq_len]
-        saliency_seq = saliency_gradients.sum(dim=-1).squeeze(0).numpy()
+            # --- B. WIZUALIZACJA MAPY ---
+            fig, ax = plt.subplots(figsize=(6, 5))
 
-        # Normalizujemy: dzielimy przez max, żeby wartości były w zakresie [0, 1]
-        if saliency_seq.max() > 0:
-            saliency_seq = saliency_seq / saliency_seq.max()
-        else:
-            saliency_seq = np.zeros_like(saliency_seq)
+            saliency_grid = np.zeros((3, 3))
+            board_state = np.zeros((3, 3), dtype=int)
 
-        # --- B. WIZUALIZACJA MAPY (HEATMAPA NA PLANSZY) ---
-        fig, ax = plt.subplots(figsize=(6, 5))
+            for i, move in enumerate(ruchy):
+                if move == 10:
+                    continue
 
-        # Przygotowujemy dane do heatmapy planszy 3x3
-        # Domyślnie plansza jest pusta
-        saliency_grid = np.zeros((3, 3))
-        board_state = np.zeros((3, 3), dtype=int)
+                row, col = move // 3, move % 3
+                if move < 9:
+                    saliency_grid[row, col] = saliency_seq[i]
+                    board_state[row, col] = 1 if i % 2 == 0 else 2
 
-        # Wypełniamy planszę istotnością ruchów, które się odbyły
-        for i, move in enumerate(ruchy):
-            # Ignorujemy token początku [10]
-            if move == 10:
-                continue
+            # Mapa ciepła
+            im = ax.imshow(saliency_grid, cmap='Oranges', vmin=0, vmax=1)
+            cbar = fig.colorbar(im, label='Ważność pola wg modelu (Latent Saliency)')
 
-            # Ruchy 0-8 odpowiadają polom 3x3
-            row, col = move // 3, move % 3
+            # Rysowanie siatki i znaków
+            for r in range(3):
+                for c in range(3):
+                    state = board_state[r, c]
+                    if state == 1:
+                        ax.text(c, r, 'X', ha='center', va='center', fontsize=20, color='blue', fontweight='bold')
+                    elif state == 2:
+                        ax.text(c, r, 'O', ha='center', va='center', fontsize=20, color='red', fontweight='bold')
+                    else:
+                        ax.text(c, r, str(r * 3 + c), ha='center', va='center', fontsize=12, color='gray', alpha=0.7)
 
-            # Przypisujemy istotność i stan planszy
-            if move < 9:
-                saliency_grid[row, col] = saliency_seq[i]
-                # Co drugi ruch to X (1), co drugi O (2)
-                board_state[row, col] = 1 if i % 2 == 0 else 2
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(f"Istotność dla decyzji:\n'{nazwa_scenariusza}'", fontsize=14, fontweight='bold')
 
-        im = ax.imshow(saliency_grid, cmap='Oranges', vmin=0, vmax=1)
-        cbar = fig.colorbar(im, label='Relatywna Istotność (Gradient)')
+            nazwa_pliku = f"saliency_interv_{nazwa_scenariusza.lower().replace(' ', '_').replace('(', '').replace(')', '')}.png"
+            sciezka_zapisu = os.path.join(FOLDER_WYJSCIOWY, nazwa_pliku)
+            plt.savefig(sciezka_zapisu, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print(f"    Zapisano mapę: {sciezka_zapisu}")
 
-        # Dodajemy opisy (znaki X/O lub numery pól) do siatki
-        for r in range(3):
-            for c in range(3):
-                state = board_state[r, c]
-                if state == 1:
-                    ax.text(c, r, 'X', ha='center', va='center', fontsize=20, color='blue', fontweight='bold')
-                elif state == 2:
-                    ax.text(c, r, 'O', ha='center', va='center', fontsize=20, color='red', fontweight='bold')
-                else:
-                    # Jeśli pole puste, pokazujemy jego numer (0-8)
-                    ax.text(c, r, str(r * 3 + c), ha='center', va='center', fontsize=12, color='gray', alpha=0.7)
-
-        # Ustawienia osi
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title(f"Istotność dla decyzji:\n'{nazwa_scenariusza}'", fontsize=14, fontweight='bold')
-
-        # Zapisujemy wykres na dysku
-        nazwa_pliku = f"saliency_{nazwa_scenariusza.lower().replace(' ', '_').replace('(', '').replace(')', '')}.png"
-        sciezka_zapisu = os.path.join(FOLDER_WYJSCIOWY, nazwa_pliku)
-        plt.savefig(sciezka_zapisu, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"    Zapisano mapę: {sciezka_zapisu}")
-
-    print("Gotowe. Wszystkie mapy istotności zostały zapisane w katalogu: '../plots/saliency_maps/'.")
+    print("Gotowe. Wszystkie mapy oparte na interwencjach zostały zapisane na dysku.")
 
 
 if __name__ == '__main__':
