@@ -13,9 +13,10 @@ def zapisz_wykres(fig, nazwa_pliku):
     if not os.path.exists('../plots'):
         os.makedirs('../plots')
     sciezka = os.path.join('../plots', nazwa_pliku)
+    # Zapisujemy z parametrem tight, żeby nie ucięło legendy na dole
     fig.savefig(sciezka, dpi=300, bbox_inches='tight')
     print(f"Zapisano: {sciezka}")
-    plt.close(fig)  # Zamyka okno, aby nie zaśmiecać RAMu
+    plt.close(fig)
 
 
 def plot_probe_comparison(linear_acc, mlp_acc):
@@ -54,41 +55,60 @@ def plot_world_model_resolution(fizyka_dane, taktyka_dane):
     return fig
 
 
-def plot_attention_shift_by_length_and_probe(dane, tytul_glowny, ylabel):
-    # Konfiguracja kolorów i etykiet dla wszystkich trzech warstw
+def plot_attention_shift_L9_grid(lin_fizyka, mlp_fizyka, lin_taktyka, mlp_taktyka):
     kolory = {
-        'warstwa_0': '#e74c3c',  # Czerwony
-        'warstwa_1': '#2c3e50',  # Ciemnogranatowy
-        'warstwa_2': '#3498db'  # Jasnoniebieski
+        'warstwa_0': '#e74c3c',
+        'warstwa_1': '#2c3e50',
+        'warstwa_2': '#3498db'
     }
     nazwy = {
         'warstwa_0': 'W0 (Początkowa)',
         'warstwa_1': 'W1 (Kartograf)',
         'warstwa_2': 'W2 (Decyzyjna)'
     }
+    L = 9
+    kroki = np.arange(1, L + 1)
 
-    fig, axes = plt.subplots(5, 1, figsize=(10, 16), constrained_layout=True)
-    fig.suptitle(tytul_glowny, fontsize=16, fontweight='bold')
+    # Tworzymy matrycę 2x2 wykresów
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
+    fig.suptitle('Zatarcie reprezentacji w czasie dla pełnych partii (9 ruchów)', fontsize=16, fontweight='bold',
+                 y=0.95)
 
-    for i, L in enumerate(range(5, 10)):
-        ax = axes[i]
-        kroki = np.arange(1, L + 1)
+    # Definiujemy co trafia na który wykres
+    zestawienia = [
+        (axes[0, 0], lin_fizyka, 'Fizyka (Puste vs Zajęte) - SONDA LINIOWA'),
+        (axes[0, 1], mlp_fizyka, 'Fizyka (Puste vs Zajęte) - SONDA MLP'),
+        (axes[1, 0], lin_taktyka, 'Taktyka (Mój vs Twój) - SONDA LINIOWA'),
+        (axes[1, 1], mlp_taktyka, 'Taktyka (Mój vs Twój) - SONDA MLP')
+    ]
 
-        # Iterujemy i rysujemy linie dla każdej warstwy
+    for ax, dane_dykt, tytul in zestawienia:
         for warstwa in ['warstwa_0', 'warstwa_1', 'warstwa_2']:
-            if not dane[L][warstwa]:
+            if not dane_dykt[L][warstwa]:
                 continue
-
-            ax.plot(kroki, dane[L][warstwa], marker='o', linewidth=2,
+            ax.plot(kroki, dane_dykt[L][warstwa], marker='o', markersize=6, linewidth=2.5,
                     label=nazwy[warstwa], color=kolory[warstwa])
 
-        ax.set_title(f'Gry kończące się w {L}. ruchu')
-        ax.set_xticks(kroki)
-        ax.set_ylabel(ylabel, fontweight='bold')
+        ax.set_title(tytul, fontsize=12)
         ax.set_ylim(30, 105)
+        ax.set_xticks(kroki)
         ax.grid(True, linestyle='--', alpha=0.7)
-        if i == 0:
-            ax.legend(loc='lower left')  # Dodajemy legendę tylko do pierwszego wykresu
+        # Usuwamy górne i prawe krawędzie ramek dla nowoczesnego wyglądu
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+    # Ustawiamy opisy osi tylko na skrajnych wykresach, aby uniknąć bałaganu
+    for ax in axes[:, 0]:
+        ax.set_ylabel('Skuteczność dekodowania (%)', fontweight='bold', fontsize=11)
+    for ax in axes[1, :]:
+        ax.set_xlabel('Numer ruchu w partii', fontweight='bold', fontsize=11)
+
+    # Wspólna legenda na samym dole
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=3, bbox_to_anchor=(0.5, 0.02), fontsize=12)
+
+    # Optymalizacja odstępów
+    plt.subplots_adjust(bottom=0.12, hspace=0.15, wspace=0.1)
 
     return fig
 
@@ -106,13 +126,12 @@ if __name__ == "__main__":
         liczba_test=liczba_test
     )
 
-    # Pojemniki na ogólne statystyki
     lin_wyniki = []
     mlp_wyniki = []
     fizyka_dane_mlp = []
     taktyka_dane_mlp = []
 
-    # Rozbudowane słowniki na 4 kategorie wykresów
+    # Rozbudowane słowniki na statystyki
     struktura = lambda: {L: {w: [] for w in ['warstwa_0', 'warstwa_1', 'warstwa_2']} for L in range(5, 10)}
     dane_lin_fizyka = struktura()
     dane_lin_taktyka = struktura()
@@ -125,7 +144,6 @@ if __name__ == "__main__":
     for warstwa in ['warstwa_0', 'warstwa_1', 'warstwa_2']:
         print(f"\nPrzetwarzanie {warstwa.upper()}...")
 
-        # Błyskawiczny trening z wykorzystaniem utils
         sonda_lin, sonda_mlp = trenuj_sondy(
             aktywacje_warstwy=aktywacje[warstwa],
             relatywne_trening=relatywne_trening,
@@ -133,30 +151,26 @@ if __name__ == "__main__":
             epochs=epochs
         )
 
-        # Wyciągamy myśli egzaminacyjne
         mysli_test = aktywacje[warstwa][liczba_trening:liczba_trening + liczba_test].view(-1, 128)
 
         with torch.no_grad():
-            # Wyniki dla sondy Liniowej
             pred_lin = sonda_lin(mysli_test).view(-1, 3, 9)
             wyroki_lin = torch.argmax(pred_lin, dim=1)
             lin_wyniki.append(round((wyroki_lin == relatywne_test).float().mean().item() * 100, 1))
 
-            # Wyniki dla sondy MLP
             pred_mlp = sonda_mlp(mysli_test).view(-1, 3, 9)
             wyroki_mlp = torch.argmax(pred_mlp, dim=1)
             mlp_wyniki.append(round((wyroki_mlp == relatywne_test).float().mean().item() * 100, 1))
 
-            # Słupki (bierzemy tylko z MLP)
             fizyka_radar = ((wyroki_mlp == 0) == (relatywne_test == 0)).float().mean().item() * 100
             fizyka_dane_mlp.append(round(fizyka_radar, 1))
             taktyka_dane_mlp.append(round((wyroki_mlp == relatywne_test).float().mean().item() * 100, 1))
 
-            # --- ANALIZA W CZASIE (DLA OBU SOND) ---
             wyroki_lin_czas = wyroki_lin.view(-1, 9, 9)
             wyroki_mlp_czas = wyroki_mlp.view(-1, 9, 9)
             prawda_czas = relatywne_test.view(-1, 9, 9)
 
+            # Nadal zbieramy dane dla L od 5 do 9, ale funkcja wykresu wyciągnie tylko L=9
             for L in range(5, 10):
                 maska = (dlugosci_test == L)
                 if maska.sum() == 0: continue
@@ -186,18 +200,13 @@ if __name__ == "__main__":
                     acc = (wyr_mlp_L[:, k, :] == prawda_L[:, k, :]).float().mean().item() * 100
                     dane_mlp_taktyka[L][warstwa].append(round(acc, 1))
 
-    print("\nGenerowanie i zapisywanie raportów...")
+    print("\nGenerowanie i zapisywanie skonsolidowanych raportów...")
 
     zapisz_wykres(plot_probe_comparison(lin_wyniki, mlp_wyniki), "01_zatarcie_liniowe.png")
     zapisz_wykres(plot_world_model_resolution(fizyka_dane_mlp, taktyka_dane_mlp), "02_obraz_swiata.png")
-    zapisz_wykres(plot_attention_shift_by_length_and_probe(dane_lin_fizyka, 'Fizyka - SONDA LINIOWA', 'Poprawność (%)'),
-                  "03_lin_fizyka.png")
-    zapisz_wykres(
-        plot_attention_shift_by_length_and_probe(dane_lin_taktyka, 'Taktyka - SONDA LINIOWA', 'Poprawność (%)'),
-        "04_lin_taktyka.png")
-    zapisz_wykres(plot_attention_shift_by_length_and_probe(dane_mlp_fizyka, 'Fizyka - SONDA MLP', 'Poprawność (%)'),
-                  "05_mlp_fizyka.png")
-    zapisz_wykres(plot_attention_shift_by_length_and_probe(dane_mlp_taktyka, 'Taktyka - SONDA MLP', 'Poprawność (%)'),
-                  "06_mlp_taktyka.png")
 
-    print("Wszystkie wykresy zapisane w folderze '../plots/'.")
+    # Tworzymy jeden zunifikowany obraz w siatce 2x2 z gier o długości L=9
+    grid_fig = plot_attention_shift_L9_grid(dane_lin_fizyka, dane_mlp_fizyka, dane_lin_taktyka, dane_mlp_taktyka)
+    zapisz_wykres(grid_fig, "03_zatarcie_czasowe_L9_grid.png")
+
+    print("Zakończono! Jeden główny wykres zatarcia zapisano jako '../plots/03_zatarcie_czasowe_L9_grid.png'.")

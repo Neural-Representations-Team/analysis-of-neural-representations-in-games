@@ -77,7 +77,7 @@ def przeprowadz_wielokrotne_interwencje():
             'ruchy': [0, 1, 3, 4, 7, 8],  # X: 0, 3, 7; O: 1, 4, 8. X może wygrać na polu 6.
             'pole_docelowe': 6,
             'stan_oryginalny': 0,  # 0 = Puste
-            'stan_falszywy': 1,  # 2 = Wróg
+            'stan_falszywy': 2,  # 2 = Wróg
             'sila': 1.0
         }
     ]
@@ -112,8 +112,13 @@ def przeprowadz_wielokrotne_interwencje():
                 czyste_prawdopodobienstwa = torch.softmax(czyste_logity[0, -1, :10], dim=0).numpy()
 
             # BIEG Z INTERWENCJĄ
+                # BIEG Z INTERWENCJĄ
             wektor_oryginalny = W_probe[stan_oryginalny * 9 + pole]
             wektor_falszywy = W_probe[stan_falszywy * 9 + pole]
+
+            # Normalizacja L2, aby wektory miały długość 1
+            wektor_oryginalny = wektor_oryginalny / (torch.norm(wektor_oryginalny) + 1e-8)
+            wektor_falszywy = wektor_falszywy / (torch.norm(wektor_falszywy) + 1e-8)
 
             def hook_interwencyjny(module, input, output):
                 output[0, -1, :] = output[0, -1, :] - (sila * wektor_oryginalny) + (sila * wektor_falszywy)
