@@ -146,7 +146,7 @@ def przeprowadz_wielokrotne_interwencje():
 
             def draw_board(ax, prob_matrix, end_prob, title, is_intervention=False):
                 annot = np.empty((3, 3), dtype=object)
-                mapa_stanow = {0: "Puste", 1: "X", 2: "O"}
+                mapa_stanow = {0: "Empty", 1: "X", 2: "O"}
 
                 for r in range(3):
                     for c in range(3):
@@ -164,9 +164,9 @@ def przeprowadz_wielokrotne_interwencje():
                         if is_intervention and indeks_pola == pole:
                             falszywy_symbol = mapa_stanow[stan_falszywy]
                             if tekst_etykiety != "":
-                                tekst_etykiety += f"\n(Zmiana na: {falszywy_symbol})"
+                                tekst_etykiety += f"\n(Change to: {falszywy_symbol})"
                             else:
-                                tekst_etykiety = f"(Zmiana na: {falszywy_symbol})"
+                                tekst_etykiety = f"(Change to: {falszywy_symbol})"
 
                         if tekst_etykiety != "":
                             tekst_etykiety += f"\n{prob_matrix[r, c]:.1f}%"

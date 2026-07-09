@@ -5,13 +5,12 @@ import json
 import os
 import numpy as np
 
-# --- IMPORTY Z TWOJEGO NARZĘDZIOWNIKA ---
-# Zakładam, że te klasy masz w probe_utils.py. Jeśli nie, po prostu upewnij się,
-# że struktura TinyTicTacToeGPT i LinearProbe zgadza się z Twoją bazą kodu.
-from probe_utils import przygotuj_dane
+# --- EXTERNAL TOOLKIT IMPORTS ---
+# Aliased to maintain structural compatibility with the original codebase.
+from probe_utils import przygotuj_dane as prepare_data
 
 
-# --- DEFINICJA MODELU I SONDY ---
+# --- MODEL AND PROBE DEFINITION ---
 class TinyTicTacToeGPT(nn.Module):
     def __init__(self, d_model=128, num_layers=3, nhead=8):
         super().__init__()
@@ -39,157 +38,164 @@ class LinearProbe(nn.Module):
         return self.layer(x)
 
 
-# --- FUNKCJE POMOCNICZE ---
-def get_padded_sequence(sekwencja_ruchow):
-    seq = sekwencja_ruchow[:9]
+# --- UTILITY FUNCTIONS ---
+def get_padded_sequence(move_sequence):
+    """Pads the sequence to a fixed length of 9 using the end-of-game token (9)."""
+    seq = move_sequence[:9]
     while len(seq) < 9:
         seq.append(9)
     return seq
 
 
-def evaluate_physics_accuracy(probe, activations, prawdziwe_plansze):
+def evaluate_physics_accuracy(probe, activations, true_board_states):
+    """Calculates spatial representation accuracy against true board states."""
     with torch.no_grad():
-        predykcje = probe(activations).view(-1, 3, 9)
-        wyroki = torch.argmax(predykcje, dim=1)
-        # Fizyka: 0 (puste) vs zajęte (1 lub 2)
-        skutecznosc_fizyki = ((wyroki == 0) == (prawdziwe_plansze == 0)).float().mean().item() * 100
-    return skutecznosc_fizyki
+        predictions = probe(activations).view(-1, 3, 9)
+        predicted_classes = torch.argmax(predictions, dim=1)
+        # Physics validation: 0 (empty) vs occupied (1 or 2)
+        physics_accuracy = ((predicted_classes == 0) == (true_board_states == 0)).float().mean().item() * 100
+    return physics_accuracy
 
 
-def wyzeruj_glowy(model, warstwa_idx, lista_glow):
+def ablate_attention_heads(model, layer_idx, head_list):
     """
-    Sprzętowo odcina wybrane głowy zamykając ich wagi wyjściowe.
+    Performs physical ablation of specified attention heads by zeroing out
+    their respective output projection weights.
     """
     d_model = 128
     nhead = 8
     head_dim = d_model // nhead
 
     with torch.no_grad():
-        out_proj = model.transformer.layers[warstwa_idx].self_attn.out_proj
-        for h in lista_glow:
+        out_proj = model.transformer.layers[layer_idx].self_attn.out_proj
+        for h in head_list:
             start_idx = h * head_dim
             end_idx = (h + 1) * head_dim
-            # Zerujemy kolumny odpowiadające za daną głowę
+            # Zero out columns corresponding to the target head
             out_proj.weight[:, start_idx:end_idx] = 0.0
 
 
-# --- GŁÓWNA LOGIKA ---
-def uruchom_eksperyment_skumulowany():
-    print("1. Ładowanie danych i czystych aktywacji...")
-    # Ścieżki - dostosuj jeśli masz inną strukturę folderów!
-    SCIEZKA_MODELU = '../models/transformer/tictactoe_model.pth'
-    SCIEZKA_DANYCH_JSON = '../data/games.json'
+# --- CORE EXPERIMENT LOGIC ---
+def run_cumulative_ablation_experiment():
+    print("1. Loading data and extracting clean baseline activations...")
+    MODEL_PATH = '../models/transformer/tictactoe_model.pth'
+    JSON_DATA_PATH = '../data/games.json'
 
-    aktywacje, relatywne_trening, relatywne_test, _ = przygotuj_dane(
+    # Kwargs preserved to avoid TypeError with external script
+    activations, relative_train, relative_test, _ = prepare_data(
         sciezka_do_danych='../data/processed/dataset_pelny.pt',
         liczba_trening=1000,
         liczba_test=200
     )
 
-    mysli_trening_L1 = aktywacje['warstwa_1'][:1000].view(-1, 128)
+    l1_train_activations = activations['warstwa_1'][:1000].view(-1, 128)
 
-    print("2. Szybki trening bazowej Sondy Liniowej dla Fizyki Planszy (Warstwa L1)...")
-    sonda = LinearProbe(128, 27)
-    optimizer = torch.optim.Adam(sonda.parameters(), lr=0.01)
+    print("2. Training reference Linear Probe for Spatial Board State (Layer L1)...")
+    probe = LinearProbe(128, 27)
+    optimizer = torch.optim.Adam(probe.parameters(), lr=0.01)
     criterion = nn.CrossEntropyLoss()
 
     for epoch in range(1000):
         optimizer.zero_grad()
-        loss = criterion(sonda(mysli_trening_L1).view(-1, 3, 9), relatywne_trening)
+        loss = criterion(probe(l1_train_activations).view(-1, 3, 9), relative_train)
         loss.backward()
         optimizer.step()
 
-    baseline_acc = evaluate_physics_accuracy(sonda, aktywacje['warstwa_1'][1000:1200].view(-1, 128), relatywne_test)
-    print(f"--> Czysta skuteczność bazowa (Baseline L1): {baseline_acc:.1f}%")
+    l1_test_activations = activations['warstwa_1'][1000:1200].view(-1, 128)
+    baseline_acc = evaluate_physics_accuracy(probe, l1_test_activations, relative_test)
+    print(f"--> Baseline L1 spatial accuracy: {baseline_acc:.1f}%")
 
-    print("\n3. Pobieranie sekwencji testowych do przepuszczania przez uszkodzony model...")
-    with open(SCIEZKA_DANYCH_JSON, 'r') as f:
-        wszystkie_gry = json.load(f)
+    print("\n3. Formatting test sequences for forward passes through the ablated model...")
+    with open(JSON_DATA_PATH, 'r') as f:
+        all_games = json.load(f)
 
-    gry_testowe = wszystkie_gry[1000:1200]
-    tensory_gier = torch.tensor([get_padded_sequence(gra) for gra in gry_testowe], dtype=torch.long)
+    test_games = all_games[1000:1200]
+    game_tensors = torch.tensor([get_padded_sequence(game) for game in test_games], dtype=torch.long)
 
-    # Funkcja do przepuszczenia gier przez uszkodzony model i wyciągnięcia aktywacji L1
-    def pobierz_zepsute_aktywacje(uszkodzony_model):
-        zepsute_L1 = []
+    def extract_ablated_activations(ablated_model):
+        """Executes a forward pass and captures ablated L1 activations."""
+        extracted_l1 = []
 
-        def hook(mod, inp, out):
-            zepsute_L1.append(out.detach())
+        def hook(module, input_tensor, output_tensor):
+            extracted_l1.append(output_tensor.detach())
 
-        handle = uszkodzony_model.transformer.layers[1].register_forward_hook(hook)
+        handle = ablated_model.transformer.layers[1].register_forward_hook(hook)
         with torch.no_grad():
-            uszkodzony_model(tensory_gier)
+            ablated_model(game_tensors)
         handle.remove()
-        return zepsute_L1[0].view(-1, 128)
+        return extracted_l1[0].view(-1, 128)
 
-    print("\n4. Pojedyncza ablacja głów w L1 w celu ustalenia hierarchii ważności...")
-    ranking_glow = []
+    print("\n4. Performing single head ablation to establish importance hierarchy...")
+    head_ranking = []
 
     for h in range(8):
-        # Za każdym razem ładujemy świeży model, by zepsuć tylko 1 głowę
+        # Initialize a clean model state for each single head ablation
         model = TinyTicTacToeGPT(d_model=128, num_layers=3, nhead=8)
-        model.load_state_dict(torch.load(SCIEZKA_MODELU, map_location='cpu', weights_only=True))
+        model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu', weights_only=True))
         model.eval()
 
-        wyzeruj_glowy(model, warstwa_idx=1, lista_glow=[h])
-        zepsute_akty = pobierz_zepsute_aktywacje(model)
-        acc = evaluate_physics_accuracy(sonda, zepsute_akty, relatywne_test)
-        spadek = baseline_acc - acc
-        ranking_glow.append({'glowa': h, 'acc': acc, 'spadek': spadek})
-        print(f" - Ablacja głowy L1.G{h}: spadek o {spadek:.2f}% (Acc: {acc:.1f}%)")
+        ablate_attention_heads(model, layer_idx=1, head_list=[h])
+        ablated_acts = extract_ablated_activations(model)
+        acc = evaluate_physics_accuracy(probe, ablated_acts, relative_test)
+        performance_drop = baseline_acc - acc
 
-    # Sortujemy od największego spadku do najmniejszego
-    ranking_glow.sort(key=lambda x: x['spadek'], reverse=True)
-    posortowane_glowy = [item['glowa'] for item in ranking_glow]
+        head_ranking.append({'head': h, 'acc': acc, 'drop': performance_drop})
+        print(f" - L1.H{h} ablated: performance drop of {performance_drop:.2f}% (Acc: {acc:.1f}%)")
 
-    print(f"\nHierarchia ważności głów (od najważniejszej): {posortowane_glowy}")
+    # Sort based on the magnitude of the performance drop (descending)
+    head_ranking.sort(key=lambda x: x['drop'], reverse=True)
+    sorted_heads = [item['head'] for item in head_ranking]
 
-    print("\n5. ABLACJA SKUMULOWANA (Cumulative Knockout)...")
-    wyniki_skumulowane = [baseline_acc]  # Zaczynamy od 0 wyłączonych głów
-    odciete_glowy = []
+    print(f"\nAttention head importance hierarchy (most to least critical): {sorted_heads}")
 
-    for h in posortowane_glowy:
-        odciete_glowy.append(h)
+    print("\n5. Executing Cumulative Ablation Sequence...")
+    cumulative_results = [baseline_acc]
+    ablated_heads_list = []
+
+    for h in sorted_heads:
+        ablated_heads_list.append(h)
+
         model = TinyTicTacToeGPT(d_model=128, num_layers=3, nhead=8)
-        model.load_state_dict(torch.load(SCIEZKA_MODELU, map_location='cpu', weights_only=True))
+        model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu', weights_only=True))
         model.eval()
 
-        wyzeruj_glowy(model, warstwa_idx=1, lista_glow=odciete_glowy)
-        zepsute_akty = pobierz_zepsute_aktywacje(model)
-        acc = evaluate_physics_accuracy(sonda, zepsute_akty, relatywne_test)
-        wyniki_skumulowane.append(acc)
+        ablate_attention_heads(model, layer_idx=1, head_list=ablated_heads_list)
+        ablated_acts = extract_ablated_activations(model)
+        acc = evaluate_physics_accuracy(probe, ablated_acts, relative_test)
+        cumulative_results.append(acc)
 
-        print(f" Wyłączono {len(odciete_glowy)} głów {odciete_glowy} -> Skuteczność fizyki: {acc:.1f}%")
+        print(f" Ablated {len(ablated_heads_list)} heads {ablated_heads_list} -> Spatial accuracy: {acc:.1f}%")
 
-    print("\n6. Generowanie wykresu naukowego...")
+    print("\n6. Generating ablation curve plot...")
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(9, 6))
 
-    os_x = np.arange(9)
-    ax.plot(os_x, wyniki_skumulowane, marker='o', color='#e74c3c', linewidth=3, markersize=8, zorder=3)
+    x_axis = np.arange(9)
+    ax.plot(x_axis, cumulative_results, marker='o', color='#e74c3c', linewidth=3, markersize=8, zorder=3)
 
-    # Obszar losowego zgadywania (~33%)
-    ax.axhline(33.3, color='gray', linestyle='--', linewidth=2, label='Poziom losowego zgadywania (~33%)', zorder=1)
+    # Random guessing threshold (~33.3% for 3 classes)
+    ax.axhline(33.3, color='gray', linestyle='--', linewidth=2, label='Random Guessing Baseline (~33%)', zorder=1)
 
-    ax.set_title('Ablacja Skumulowana w Warstwie L1\n(Zjawisko Graceful Degradation)', fontsize=14, fontweight='bold')
-    ax.set_xlabel('Liczba wyłączonych Głów Uwagi (od najważniejszej do najmniej ważnej)', fontsize=12,
-                  fontweight='bold')
-    ax.set_ylabel('Skuteczność detekcji fizyki planszy (%)', fontsize=12, fontweight='bold')
+    ax.set_title('Cumulative Attention Head Ablation in Layer L1\n(Graceful Degradation Evidence)', fontsize=14,
+                 fontweight='bold')
+    ax.set_xlabel('Number of Ablated Attention Heads (Ordered by Importance)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Spatial Representation Accuracy (%)', fontsize=12, fontweight='bold')
 
-    ax.set_xticks(os_x)
+    ax.set_xticks(x_axis)
     ax.set_ylim(20, 105)
     ax.legend(loc='lower left')
 
-    # Dodanie adnotacji wartości nad punktami
-    for i, txt in enumerate(wyniki_skumulowane):
-        ax.annotate(f"{txt:.1f}%", (os_x[i], wyniki_skumulowane[i] + 2), ha='center', fontsize=10, fontweight='bold')
+    # Value annotations above data points
+    for i, val in enumerate(cumulative_results):
+        ax.annotate(f"{val:.1f}%", (x_axis[i], cumulative_results[i] + 2), ha='center', fontsize=10, fontweight='bold')
 
     plt.tight_layout()
     os.makedirs('../plots', exist_ok=True)
-    plt.savefig('../plots/08_ablacja_skumulowana.png', dpi=300)
-    print("Zapisano wykres do '../plots/08_ablacja_skumulowana.png'!")
+    plot_path = '../plots/08_cumulative_ablation.png'
+    plt.savefig(plot_path, dpi=300)
+    print(f"Plot saved successfully to: {plot_path}")
     plt.show()
 
 
 if __name__ == "__main__":
-    uruchom_eksperyment_skumulowany()
+    run_cumulative_ablation_experiment()

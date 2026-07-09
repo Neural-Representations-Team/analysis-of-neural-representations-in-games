@@ -6,13 +6,14 @@ import numpy as np
 import os
 import json
 
-# Importy z narzędziownika
-from probe_utils import przygotuj_dane, trenuj_sondy
+# --- EXTERNAL TOOLKIT IMPORTS ---
+# Aliased to maintain strict compatibility with local parameters
+from probe_utils import przygotuj_dane as prepare_data, trenuj_sondy as train_probes
 
 plt.style.use('ggplot')
 
 
-# --- DEFINICJA MODELU ---
+# --- MODEL DEFINITION ---
 class TinyTicTacToeGPT(nn.Module):
     def __init__(self, d_model=128, num_layers=3, nhead=8):
         super().__init__()
@@ -32,121 +33,122 @@ class TinyTicTacToeGPT(nn.Module):
         return self.fc_out(out)
 
 
-# --- FUNKCJA NAPRAWCZA ---
-def pobierz_gry_testowe(start=1000, koniec=1200):
+# --- DATA PREPARATION ---
+def load_test_games(start=1000, end=1200):
     """
-    Pobiera oryginalne sekwencje ruchów bezpośrednio z pliku JSON,
-    aby wymiary tensora idealnie pasowały do wejścia modelu (Batch x 9).
+    Extracts original game sequences directly from the JSON file
+    to ensure tensor dimensions strictly align with the model's input (Batch x 9).
     """
-    with open('../data/games.json', 'r') as plik:
-        dane_gry = json.load(plik)
+    with open('../data/games.json', 'r') as file:
+        game_data = json.load(file)
 
-    sekwencje = []
-    for ruchy in dane_gry[start:koniec]:
-        sekwencja = ruchy[:9]
-        # Dopełniamy tokenem końca gry (9), żeby każda sekwencja miała długość 9
-        while len(sekwencja) < 9:
-            sekwencja.append(9)
-        sekwencje.append(sekwencja)
+    sequences = []
+    for moves in game_data[start:end]:
+        sequence = moves[:9]
+        # Pad with the End-of-Game token (9) to maintain a fixed sequence length of 9
+        while len(sequence) < 9:
+            sequence.append(9)
+        sequences.append(sequence)
 
-    return torch.tensor(sekwencje, dtype=torch.long)
+    return torch.tensor(sequences, dtype=torch.long)
 
 
-# --- GŁÓWNA LOGIKA EKSPERYMENTU ---
-def przeprowadz_ablacje():
-    print("Ładowanie danych...")
-    aktywacje_czyste, relatywne_trening, relatywne_test, _ = przygotuj_dane(
+# --- CORE EXPERIMENT LOGIC ---
+def perform_ablation_study():
+    print("Loading data...")
+    # Kwargs kept identical to avoid TypeError with external script
+    clean_activations, relative_train, relative_test, _ = prepare_data(
         sciezka_do_danych='../data/processed/dataset_pelny.pt',
         liczba_trening=1000,
         liczba_test=200
     )
 
-    print("Krok 1: Trening sondy odniesienia (Czysty model)...")
-    # Trenujemy sondę na czystej warstwie 1 (Kartograf)
-    sonda_czysta, _ = trenuj_sondy(aktywacje_czyste['warstwa_1'], relatywne_trening, 1000, epochs=500)
+    print("Step 1: Train the reference probe (Baseline Model)...")
+    # Train the probe on the unablated Layer 1 spatial representations
+    reference_probe, _ = train_probes(clean_activations['warstwa_1'], relative_train, 1000, epochs=500)
 
-    mysli_test_czyste = aktywacje_czyste['warstwa_1'][1000:1200].view(-1, 128)
+    clean_test_activations = clean_activations['warstwa_1'][1000:1200].view(-1, 128)
 
     with torch.no_grad():
-        pred_czyste = sonda_czysta(mysli_test_czyste).view(-1, 3, 9)
-        wyroki_czyste = torch.argmax(pred_czyste, dim=1)
-        prawdziwe_puste = (relatywne_test == 0)
-        zgadniete_puste_czyste = (wyroki_czyste == 0)
-        baza_fizyka_acc = (zgadniete_puste_czyste == prawdziwe_puste).float().mean().item() * 100
+        clean_preds = reference_probe(clean_test_activations).view(-1, 3, 9)
+        clean_predictions = torch.argmax(clean_preds, dim=1)
+        true_empty = (relative_test == 0)
+        predicted_empty_clean = (clean_predictions == 0)
+        baseline_spatial_acc = (predicted_empty_clean == true_empty).float().mean().item() * 100
 
-    print(f"Czysta skuteczność mapy przestrzennej: {baza_fizyka_acc:.1f}%\n")
+    print(f"Baseline spatial representation accuracy: {baseline_spatial_acc:.1f}%\n")
 
-    print("Krok 2: Ładowanie modelu i wstrzykiwanie haczyków do ekstrakcji w locie...")
+    print("Step 2: Load the model and register extraction hooks...")
     model = TinyTicTacToeGPT()
     model.load_state_dict(
         torch.load('../models/transformer/tictactoe_model.pth', map_location='cpu', weights_only=True))
     model.eval()
 
-    # ZMIANA: Używamy prawidłowych, jednowymiarowych sekwencji wejściowych
-    gry_testowe = pobierz_gry_testowe(1000, 1200)
+    # Utilize standardized, one-dimensional input sequences
+    test_games = load_test_games(1000, 1200)
 
-    nowe_aktywacje = {}
+    extracted_activations = {}
 
-    def ekstrakcja_hook(module, input, output):
-        nowe_aktywacje['val'] = output.detach()
+    def extraction_hook(module, input, output):
+        extracted_activations['val'] = output.detach()
 
-    model.transformer.layers[1].register_forward_hook(ekstrakcja_hook)
+    model.transformer.layers[1].register_forward_hook(extraction_hook)
 
-    wyniki_ablacji = np.zeros((3, 8))
+    ablation_results = np.zeros((3, 8))
 
-    print("Krok 3: Rozpoczęcie operacji uszkadzania (Ablacje na wagach)...")
+    print("Step 3: Perform weight ablation...")
 
     d_model = 128
     nhead = 8
     head_dim = d_model // nhead
 
-    for warstwa in range(3):
-        for glowa in range(8):
-            # Zapisujemy oryginalne wagi do pamięci
-            oryginalne_wagi = model.transformer.layers[warstwa].self_attn.out_proj.weight.data.clone()
+    for layer in range(3):
+        for head in range(8):
+            # Store original weights in memory
+            original_weights = model.transformer.layers[layer].self_attn.out_proj.weight.data.clone()
 
-            start_idx = glowa * head_dim
+            start_idx = head * head_dim
             end_idx = start_idx + head_dim
 
-            # FIZYCZNA ABLACJA: Zerujemy kolumny odpowiadające za wybraną głowę
-            model.transformer.layers[warstwa].self_attn.out_proj.weight.data[:, start_idx:end_idx] = 0.0
+            # PHYSICAL ABLATION: Zero out the columns corresponding to the target attention head
+            model.transformer.layers[layer].self_attn.out_proj.weight.data[:, start_idx:end_idx] = 0.0
 
             with torch.no_grad():
-                # Sieć trawi poprawne dane (właściwy wymiar)
-                _ = model(gry_testowe)
-                mysli_uszkodzone = nowe_aktywacje['val'].view(-1, 128)
+                # Process the standardized inputs
+                _ = model(test_games)
+                ablated_activations = extracted_activations['val'].view(-1, 128)
 
-                pred_uszkodzone = sonda_czysta(mysli_uszkodzone).view(-1, 3, 9)
-                wyroki_uszkodzone = torch.argmax(pred_uszkodzone, dim=1)
+                ablated_preds = reference_probe(ablated_activations).view(-1, 3, 9)
+                ablated_predictions = torch.argmax(ablated_preds, dim=1)
 
-                zgadniete_puste = (wyroki_uszkodzone == 0)
-                acc_uszkodzone = (zgadniete_puste == prawdziwe_puste).float().mean().item() * 100
+                predicted_empty_ablated = (ablated_predictions == 0)
+                ablated_acc = (predicted_empty_ablated == true_empty).float().mean().item() * 100
 
-            spadek = baza_fizyka_acc - acc_uszkodzone
-            wyniki_ablacji[warstwa, glowa] = spadek
+            performance_drop = baseline_spatial_acc - ablated_acc
+            ablation_results[layer, head] = performance_drop
 
-            # Przywracamy oryginalne wagi przed kolejną pętlą
-            model.transformer.layers[warstwa].self_attn.out_proj.weight.data = oryginalne_wagi
+            # Restore original weights before the next iteration
+            model.transformer.layers[layer].self_attn.out_proj.weight.data = original_weights
 
-    print("\nGenerowanie mapy obwodów...")
+    print("\nGenerating circuit map...")
     os.makedirs('../plots/ablations', exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(10, 4), constrained_layout=True)
 
-    sns.heatmap(wyniki_ablacji, annot=True, fmt=".1f", cmap="Reds",
-                xticklabels=[f"G{i}" for i in range(8)],
+    sns.heatmap(ablation_results, annot=True, fmt=".1f", cmap="Reds",
+                xticklabels=[f"H{i}" for i in range(8)],
                 yticklabels=[f"L{i}" for i in range(3)], ax=ax,
-                cbar_kws={'label': 'Spadek skuteczności mapy (%)'})
+                cbar_kws={'label': 'Spatial Accuracy Drop (%)'})
 
-    ax.set_title("Lokalizacja Obwodu Mapy Przestrzennej (Ablacje Głów)", fontsize=14, fontweight='bold')
-    ax.set_xlabel("Głowa Uwagi (Attention Head)", fontweight='bold')
-    ax.set_ylabel("Warstwa Sieci", fontweight='bold')
+    ax.set_title("Spatial Map Circuit Localization (Head Ablation)", fontsize=14, fontweight='bold')
+    ax.set_xlabel("Attention Head", fontweight='bold')
+    ax.set_ylabel("Network Layer", fontweight='bold')
 
-    sciezka = '../plots/ablations/07_obwod_mapy.png'
-    plt.savefig(sciezka, dpi=300)
+    plot_path = '../plots/ablations/07_spatial_circuit.png'
+    plt.savefig(plot_path, dpi=300)
     plt.close(fig)
-    print(f"Zapisano rygorystyczny dowód lokalizacji obwodów w: {sciezka}")
+    print(f"Circuit localization proof saved to: {plot_path}")
 
 
 if __name__ == '__main__':
-    przeprowadz_ablacje()
+    perform_ablation_study()

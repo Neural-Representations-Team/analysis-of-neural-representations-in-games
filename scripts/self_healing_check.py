@@ -2,14 +2,16 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
-# --- IMPORTY Z TWOJEGO NARZĘDZIOWNIKA ---
-from probe_utils import przygotuj_dane, trenuj_sondy
+# --- EXTERNAL TOOLKIT IMPORTS ---
+# Aliased to maintain strict compatibility with your local files
+from probe_utils import przygotuj_dane as prepare_data, trenuj_sondy as train_probes
 
 plt.style.use('ggplot')
 
 
-# --- 1. ZDEFINIUJ MODEL ---
+# --- 1. MODEL DEFINITION ---
 class TinyTicTacToeGPT(nn.Module):
     def __init__(self, d_model=128, num_layers=3, nhead=8):
         super().__init__()
@@ -27,120 +29,122 @@ class TinyTicTacToeGPT(nn.Module):
         return self.transformer(x, mask=mask)
 
 
-def wytrenuj_i_pobierz_wektor_konceptualny(badane_pole, warstwa='warstwa_1', d_model=128):
-    print(f"\n--- Trening sondy w locie dla pola {badane_pole} na {warstwa} ---")
+def train_and_extract_concept_vector(target_square, layer='warstwa_1', d_model=128):
+    print(f"\n--- On-the-fly probing for square {target_square} at {layer} ---")
 
-    aktywacje, relatywne_trening, _, _ = przygotuj_dane(
+    # kwargs kept identical to ensure compatibility with probe_utils.py
+    activations, relative_train, _, _ = prepare_data(
         sciezka_do_danych='../data/processed/dataset_pelny.pt',
         liczba_trening=500,
         liczba_test=10
     )
 
-    sonda_lin, _ = trenuj_sondy(
-        aktywacje_warstwy=aktywacje[warstwa],
-        relatywne_trening=relatywne_trening,
+    linear_probe, _ = train_probes(
+        aktywacje_warstwy=activations[layer],
+        relatywne_trening=relative_train,
         liczba_trening=500,
         epochs=300
     )
 
-    wagi = next(sonda_lin.parameters()).detach().cpu()
+    weights = next(linear_probe.parameters()).detach().cpu()
 
-    # POPRAWIONA MATEMATYKA INDEKSÓW (Zgodna z .view(-1, 3, 9))
-    idx_puste = 0 * 9 + badane_pole
-    idx_X = 1 * 9 + badane_pole
-    idx_O = 2 * 9 + badane_pole
+    # CORRECTED INDEX MATH (Aligned with .view(-1, 3, 9))
+    idx_empty = 0 * 9 + target_square
+    idx_X = 1 * 9 + target_square
+    idx_O = 2 * 9 + target_square
 
-    waga_puste = wagi[idx_puste, :]
-    waga_X = wagi[idx_X, :]
-    waga_O = wagi[idx_O, :]
+    weight_empty = weights[idx_empty, :]
+    weight_X = weights[idx_X, :]
+    weight_O = weights[idx_O, :]
 
-    # Wektor "Zajętości" (Occupancy): Pchamy w stronę X i O, odpychamy od Puste
-    wektor_konceptu = ((waga_X + waga_O) / 2.0) - waga_puste
+    # Occupancy Vector: Shift towards X and O, subtract Empty baseline
+    concept_vector = ((weight_X + weight_O) / 2.0) - weight_empty
 
-    # Normalizacja wektora
-    wektor_konceptu = wektor_konceptu / torch.norm(wektor_konceptu)
-    return wektor_konceptu
+    # Vector normalization
+    concept_vector = concept_vector / torch.norm(concept_vector)
+    return concept_vector
 
 
-def badaj_strumien_residualny(sciezka_modelu, sekwencja_gry, badane_pole):
+def analyze_residual_stream(model_path, game_sequence, target_square):
     device = torch.device('cpu')
 
-    wektor_konceptu = wytrenuj_i_pobierz_wektor_konceptualny(badane_pole, warstwa='warstwa_1')
+    concept_vector = train_and_extract_concept_vector(target_square, layer='warstwa_1')
 
-    print("\n--- Analiza Strumienia Residualnego ---")
+    print("\n--- Residual Stream Analysis ---")
     model = TinyTicTacToeGPT(d_model=128, num_layers=3, nhead=8).to(device)
-    model.load_state_dict(torch.load(sciezka_modelu, map_location=device, weights_only=True))
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()
 
-    x = torch.tensor([sekwencja_gry], dtype=torch.long).to(device)
+    x = torch.tensor([game_sequence], dtype=torch.long).to(device)
 
-    historia_strumienia = []
-    uchwyty_hookow = []
+    stream_history = []
+    hook_handles = []
 
-    def pre_hook_l0(module, wejscie):
-        strumien = wejscie[0][0, -1, :]
-        projekcja = torch.dot(strumien, wektor_konceptu).item()
-        historia_strumienia.append(("Start (Tylko Embeddings)", projekcja))
+    def pre_hook_l0(module, input_tensor):
+        stream = input_tensor[0][0, -1, :]
+        projection = torch.dot(stream, concept_vector).item()
+        stream_history.append(("Start (Embeddings Only)", projection))
 
-    def hook_po_warstwie(nazwa_warstwy):
-        def hook(module, wejscie, wyjscie):
-            strumien = wyjscie[0, -1, :]
-            projekcja = torch.dot(strumien, wektor_konceptu).item()
-            historia_strumienia.append((f"Po warstwie {nazwa_warstwy}", projekcja))
+    def post_layer_hook(layer_name):
+        def hook(module, input_tensor, output_tensor):
+            stream = output_tensor[0, -1, :]
+            projection = torch.dot(stream, concept_vector).item()
+            stream_history.append((f"Post-Layer {layer_name}", projection))
 
         return hook
 
-    uchwyty_hookow.append(model.transformer.layers[0].register_forward_pre_hook(pre_hook_l0))
-    uchwyty_hookow.append(model.transformer.layers[0].register_forward_hook(hook_po_warstwie("L0")))
-    uchwyty_hookow.append(model.transformer.layers[1].register_forward_hook(hook_po_warstwie("L1")))
-    uchwyty_hookow.append(model.transformer.layers[2].register_forward_hook(hook_po_warstwie("L2 (Finał)")))
+    hook_handles.append(model.transformer.layers[0].register_forward_pre_hook(pre_hook_l0))
+    hook_handles.append(model.transformer.layers[0].register_forward_hook(post_layer_hook("L0")))
+    hook_handles.append(model.transformer.layers[1].register_forward_hook(post_layer_hook("L1")))
+    hook_handles.append(model.transformer.layers[2].register_forward_hook(post_layer_hook("L2 (Final)")))
 
     with torch.no_grad():
         seq_len = x.size(1)
         positions = torch.arange(0, seq_len, device=device).unsqueeze(0)
-        wejscie_emb = model.embedding(x) + model.pos_encoder(positions)
+        input_emb = model.embedding(x) + model.pos_encoder(positions)
         mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(device)
-        _ = model.transformer(wejscie_emb, mask=mask)
+        _ = model.transformer(input_emb, mask=mask)
 
-    for uchwyt in uchwyty_hookow:
-        uchwyt.remove()
+    for handle in hook_handles:
+        handle.remove()
 
-    etapy = [val[0] for val in historia_strumienia]
-    wartosci = [val[1] for val in historia_strumienia]
+    stages = [val[0] for val in stream_history]
+    values = [val[1] for val in stream_history]
 
     plt.figure(figsize=(10, 6))
-    # Zielony kolor bo tym razem wynik będzie pozytywny!
-    plt.plot(etapy, wartosci, marker='o', linestyle='-', linewidth=3, markersize=10, color='#2ecc71')
-    plt.fill_between(etapy, wartosci, color='#2ecc71', alpha=0.1)
+
+    # Positive signal representation
+    plt.plot(stages, values, marker='o', linestyle='-', linewidth=3, markersize=10, color='#2ecc71')
+    plt.fill_between(stages, values, color='#2ecc71', alpha=0.1)
 
     plt.title(
-        f"Kumulacja Reprezentacji Zajętości Pola w Strumieniu Residualnym\n(Badane pole: {badane_pole}, Sekwencja gry: {sekwencja_gry})",
-        fontsize=14, fontweight='bold')
-    plt.ylabel("Siła sygnału (Projekcja na wektor 'Zajęte')", fontsize=12)
+        f"Accumulation of Square Occupancy Representation in the Residual Stream\n(Target square: {target_square}, Game sequence: {game_sequence})",
+        fontsize=14, fontweight='bold'
+    )
+    plt.ylabel("Signal Strength (Projection on 'Occupied' vector)", fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
 
-    for i, txt in enumerate(wartosci):
-        plt.annotate(f"{txt:.2f}", (etapy[i], wartosci[i]), textcoords="offset points", xytext=(0, 10), ha='center',
+    for i, txt in enumerate(values):
+        plt.annotate(f"{txt:.2f}", (stages[i], values[i]), textcoords="offset points", xytext=(0, 10), ha='center',
                      fontsize=12, fontweight='bold')
 
-    print("\n--- WYNIKI DOWODU NA STRUMIEŃ RESIDUALNY ---")
-    for etap, val in historia_strumienia:
-        print(f"{etap}: {val:.3f}")
+    print("\n--- RESIDUAL STREAM EVIDENCE RESULTS ---")
+    for stage, val in stream_history:
+        print(f"{stage}: {val:.3f}")
 
     plt.tight_layout()
-    import os
     os.makedirs('../plots', exist_ok=True)
-    sciezka_wykresu = '../plots/residual_stream_proof.png'
-    plt.savefig(sciezka_wykresu, dpi=300)
-    print(f"\nZapisano wykres do: {sciezka_wykresu}")
+    plot_path = '../plots/residual_stream_proof.png'
+    plt.savefig(plot_path, dpi=300)
+    print(f"\nPlot saved to: {plot_path}")
     plt.show()
 
 
 if __name__ == "__main__":
-    SCIEZKA_MODELU = '../models/transformer/tictactoe_model.pth'
+    MODEL_PATH = '../models/transformer/tictactoe_model.pth'
 
-    # Gramy partię, w której Pole 0 zostaje zajęte natychmiast na początku
-    gra_testowa = [0, 4, 1, 8, 3]
+    # Execute a game sequence where Square 0 is occupied immediately
+    test_game = [0, 4, 1, 8, 3]
 
-    # Cel: Udowodnić, że sieć wie o tym, że Pole 0 jest zablokowane
-    badaj_strumien_residualny(SCIEZKA_MODELU, gra_testowa, badane_pole=0)
+    # Objective: Demonstrate the network's representation of the occupied target square
+    analyze_residual_stream(MODEL_PATH, test_game, target_square=0)

@@ -75,26 +75,28 @@ def zbadaj_obwod_sedziego(model, sekwencja_gry, warstwa_docelowa, glowa_docelowa
 
     plt.figure(figsize=(10, 4))
 
-    # Etykiety osi X (historia ruchów)
-    etykiety_x = [f"Ruch {i + 1}\n(Pole {p})" for i, p in enumerate(sekwencja_gry)]
+    # X-axis labels (move history)
 
-    # Rysujemy 1D heatmapę
+
+    x_labels = [f"Move {i + 1}\n(Square {p})" for i, p in enumerate(sekwencja_gry)]
+
+    # Plot 1D heatmap
     sns.heatmap(
         [uwaga_ostatniego_tokenu],
         annot=True,
         cmap="Reds",
-        xticklabels=etykiety_x,
-        yticklabels=["Uwaga\nprzed końcem"],
-        cbar_kws={'label': 'Siła Uwagi (Attention Weight)'},
+        xticklabels=x_labels,
+        yticklabels=["Final Token\nAttention"],
+        cbar_kws={'label': 'Attention Weight'},
         fmt=".3f"
     )
 
-    plt.title(f"Dowód na Obwód Sędziego: Atencja Warstwy L{warstwa_docelowa}, Głowy H{glowa_docelowa}\n"
-              f"Rozkład uwagi w momencie ewaluacji wygranej", pad=15)
-    plt.xlabel("Liniowa historia ruchów (sekwencja wejściowa)")
+    plt.title(f"Evidence for Referee Circuit: Layer L{warstwa_docelowa}, Head H{glowa_docelowa} Attention\n"
+              f"Attention distribution during win evaluation", pad=15)
+    plt.xlabel("Linear move history (input sequence)")
     plt.tight_layout()
-    plt.savefig(f"sedzia_W{warstwa_docelowa}_G{glowa_docelowa}.png", dpi=300)
-    print(f"Pomyślnie wygenerowano plik: sedzia_W{warstwa_docelowa}_G{glowa_docelowa}.png")
+    plt.savefig(f"referee_L{warstwa_docelowa}_H{glowa_docelowa}.png", dpi=300)
+    print(f"Successfully generated: referee_L{warstwa_docelowa}_H{glowa_docelowa}.png")
     plt.show()
 
 
